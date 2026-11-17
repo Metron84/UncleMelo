@@ -36,7 +36,7 @@ export function Welcome({ view, busy, message, progress, onChoose, onFiles, onRe
           <h1 className="mt-8 text-title font-medium">Your music. Your folders. No internet needed.</h1>
           <p className="mt-4 text-body text-muted">
             {fileChooser
-              ? "In Files, hold UncleMelo Music and tap Compress. Then choose the zip here. The songs stay on this phone."
+              ? "In Files, hold UncleMelo Music and tap Compress. Then choose the zip here. Several parts can be chosen together. The songs stay on this phone."
               : "Point UncleMelo at your UncleMelo Music folder once."}
           </p>
           {progress ? (
@@ -62,7 +62,7 @@ export function Welcome({ view, busy, message, progress, onChoose, onFiles, onRe
                   event.target.value = ""
                 }}
               />
-              <p className="mt-4 text-meta text-muted">The phone needs about 4 GB free.</p>
+              <p className="mt-4 text-meta text-muted">The phone needs free space for the zip, plus a little extra.</p>
             </>
           ) : (
             <button
@@ -76,7 +76,7 @@ export function Welcome({ view, busy, message, progress, onChoose, onFiles, onRe
             </button>
           )}
           {busy && !progress && <p className="mt-6 text-body">Reading your music</p>}
-          {message && <p className="mt-4 text-body text-muted">{message}</p>}
+          {message && <p className="mt-4 whitespace-pre-line text-body text-muted">{message}</p>}
           <p className="mt-6 text-meta text-muted">Nothing is uploaded. Files stay where they are.</p>
         </>
       )}

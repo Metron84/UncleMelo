@@ -136,6 +136,9 @@ function Player() {
         </div>
       )}
       <div className={wide ? "h-dvh w-[420px] shrink-0 overflow-y-auto" : undefined}>
+        {!wide && library.message && (
+          <p className="whitespace-pre-line px-6 pt-4 text-body text-muted">{library.message}</p>
+        )}
         <NowPlaying
           theme={theme}
           onToggleTheme={toggleTheme}

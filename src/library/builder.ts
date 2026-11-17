@@ -163,6 +163,7 @@ export async function assembleLibrary(
   readTags: (batch: { key: string; file: File }[]) => Promise<TagRead[]>,
   onProgress: (progress: ScanProgress) => void,
   signal: AbortSignal,
+  batchSize = scanBatchSize,
 ) {
   if (signal.aborted) throw new ScanCancelled()
   const previousByPath = new Map(previous.map((row) => [row.path, row]))
@@ -189,9 +190,9 @@ export async function assembleLibrary(
   }
   onProgress({ done, total })
 
-  for (let index = 0; index < pending.length; index += scanBatchSize) {
+  for (let index = 0; index < pending.length; index += batchSize) {
     if (signal.aborted) throw new ScanCancelled()
-    const batch = pending.slice(index, index + scanBatchSize)
+    const batch = pending.slice(index, index + batchSize)
     const tags = await readTags(batch.map((entry) => ({ key: entry.path, file: entry.file })))
     if (signal.aborted) throw new ScanCancelled()
     const byKey = new Map(tags.map((tag) => [tag.key, tag]))
@@ -240,8 +241,9 @@ export async function buildLibrary(
   previous: readonly ScannedFile[],
   onProgress: (progress: ScanProgress) => void,
   signal: AbortSignal,
+  batchSize = scanBatchSize,
 ) {
-  return assembleLibrary(entries, previous, (batch) => readTagsWithWorker(batch, signal), onProgress, signal)
+  return assembleLibrary(entries, previous, (batch) => readTagsWithWorker(batch, signal), onProgress, signal, batchSize)
 }
 
 function hasKeyword(text: string, keyword: string) {

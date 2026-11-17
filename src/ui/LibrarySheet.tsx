@@ -129,7 +129,7 @@ export function LibraryPanel(props: LibraryPanelProps) {
         <button type="button" className="mx-6 mt-1 h-11 text-left text-body text-accent" onClick={props.onLetUncleChoose}>
           Let Uncle choose
         </button>
-        {props.message && <p className="px-6 text-meta text-muted">{props.message}</p>}
+        {props.message && <p className="whitespace-pre-line px-6 text-meta text-muted">{props.message}</p>}
         <div className="px-6 pt-2">
           <input
             ref={searchRef}

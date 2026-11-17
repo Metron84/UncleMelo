@@ -19,9 +19,10 @@ import {
   supportsDirectoryPicker,
   tracksInLibraryDocument,
 } from "../library/folder.ts"
-import { clearPhoneMusic, listPhoneFiles, openPhoneWriter, phoneStorageAvailable, writePhoneFile } from "../library/phone.ts"
+import { importPhoneZips, requestWakeLock, stopZipWorker, StorageSpaceError } from "../library/import-zip.ts"
+import { listPhoneFiles, phoneStorageAvailable } from "../library/phone.ts"
 import type { TrackRecord } from "../library/types.ts"
-import { readZip } from "../library/zip.ts"
+import { continuationLine, homeScreenLine, importSummary, keepOpenLine, runningStandalone, sortZipFiles, storedLibraryPath } from "../library/zip.ts"
 
 export type LibraryView = "loading" | "welcome" | "reconnect" | "ready"
 
@@ -95,6 +96,7 @@ export function useLibrary() {
       live = false
       controller.abort()
       stopScanWorker()
+      stopZipWorker()
     }
   }, [])
 
@@ -106,6 +108,7 @@ export function useLibrary() {
   function begin() {
     abortRef.current?.abort()
     stopScanWorker()
+    stopZipWorker()
     const controller = new AbortController()
     abortRef.current = controller
     return controller
@@ -156,50 +159,33 @@ export function useLibrary() {
 
   async function chooseFiles(list: FileList) {
     const picked = [...list]
-    const zips = picked.filter((file) => file.name.toLocaleLowerCase().endsWith(".zip"))
+    const zips = sortZipFiles(picked.filter((file) => file.name.toLocaleLowerCase().endsWith(".zip")))
     const loose = filesFromList(picked.filter((file) => !file.name.toLocaleLowerCase().endsWith(".zip")))
     if (zips.length === 0 && loose.length === 0) {
       setMessage("No music files were found.")
       return
     }
     setBusy(true)
-    setMessage(null)
+    setMessage(installLine())
     const controller = begin()
+    const releaseWake = await requestWakeLock()
     try {
       if (!phoneStorageAvailable()) throw new Error("This browser can't keep the music on the phone.")
-      await keepPhoneStorage()
-      await ensureRoom(zips, loose)
-      await clearPhoneMusic()
-      let libraryText: string | null = null
-      for (const zip of zips) {
-        const writer = openPhoneWriter()
-        try {
-          const saved = await readZip(
-            zip,
-            async (path, data, final) => {
-              await writer.write(path, data, final)
-            },
-            (read, total) => {
-              const scale = 1024 * 1024
-              setProgress({
-                done: Math.round(read / scale),
-                total: Math.max(1, Math.round(total / scale)),
-                label: "Saving your music",
-              })
-            },
-            controller.signal,
-          )
-          libraryText = saved.libraryText ?? libraryText
-        } finally {
-          await writer.close()
-        }
-      }
-      for (const entry of loose) {
-        await writePhoneFile(entry.path, new Uint8Array(await entry.file.arrayBuffer()))
-      }
+      setMessage(importNotice(0, 0))
+      const saved = await importPhoneZips({
+        zips,
+        loose,
+        signal: controller.signal,
+        onProgress: setProgress,
+        onNotice: (done, total) => setMessage(importNotice(done, total)),
+      })
       const entries = (await listPhoneFiles()).map(entryFromStored)
-      if (entries.length === 0) throw new Error("No music files were found.")
-      const rows = await tracksFromPhone(entries, libraryText, controller.signal, setProgress)
+      if (entries.length === 0) {
+        if (saved.skipped.length === 0) throw new Error("No music files were found.")
+        setMessage(importSummary(saved.imported, saved.total, saved.skipped))
+        return
+      }
+      const rows = await tracksFromPhone(entries, saved.libraryText, controller.signal, setProgress)
       await db.settings.put({ key: phoneKey, value: true })
       filesRef.current = new Map()
       sessionEntries.current = []
@@ -210,14 +196,21 @@ export function useLibrary() {
       setHandle(null)
       setTracks(rows)
       setView("ready")
+      setMessage(importSummary(saved.imported, saved.total, saved.skipped))
     } catch (error) {
       if (abortRef.current !== controller) return
       if (error instanceof ScanCancelled) {
-        await db.settings.put({ key: phoneKey, value: false })
+        setMessage(null)
+        return
+      }
+      if (error instanceof StorageSpaceError) {
+        const lines = [installLine(), error.message].filter((line): line is string => Boolean(line))
+        setMessage(lines.join("\n"))
         return
       }
       setMessage(error instanceof Error ? error.message : "Those files couldn't be read.")
     } finally {
+      await releaseWake()
       if (abortRef.current === controller) {
         setBusy(false)
         setProgress(null)
@@ -289,6 +282,7 @@ export function useLibrary() {
   function cancelScan() {
     abortRef.current?.abort()
     stopScanWorker()
+    stopZipWorker()
   }
 
   function loseAccess() {
@@ -319,19 +313,12 @@ async function loadPhoneTracks() {
   return tracks.length > 0 ? tracks : null
 }
 
-async function keepPhoneStorage() {
-  try {
-    await navigator.storage.persist?.()
-  } catch {
-    return
-  }
+function installLine() {
+  return runningStandalone() ? null : homeScreenLine
 }
 
-async function ensureRoom(zips: File[], loose: FileEntry[]) {
-  const estimate = await navigator.storage.estimate()
-  const free = (estimate.quota ?? 0) - (estimate.usage ?? 0)
-  const incoming = zips.reduce((sum, file) => sum + file.size, 0) + loose.reduce((sum, entry) => sum + entry.size, 0)
-  if (free > 0 && incoming > free) throw new Error("This phone doesn't have room for that library.")
+function importNotice(done: number, total: number) {
+  return [installLine(), continuationLine(done, total), keepOpenLine].filter((line): line is string => Boolean(line)).join("\n")
 }
 
 async function tracksFromPhone(
@@ -349,14 +336,22 @@ async function tracksFromPhone(
       parsed = null
     }
   }
-  const matched = parsed?.filter((track) => listed.has(track.path)) ?? []
-  if (matched.length > 0) {
+  const matched = (parsed ?? []).flatMap((track) => {
+    const path = storedLibraryPath(track.path, listed)
+    if (!path) return []
+    return [path === track.path ? track : { ...track, path }]
+  })
+  const covered = new Set(matched.map((track) => track.path))
+  const missing = entries.filter((entry) => !covered.has(entry.path))
+  if (matched.length > 0 && missing.length === 0) {
     await saveJsonLibrary(matched)
     return matched
   }
-  const built = await buildLibrary(entries, [], onProgress, signal)
-  await saveBuiltLibrary(built.tracks, built.scanned)
-  return built.tracks
+  if (missing.length === 0) return matched
+  const built = await buildLibrary(missing, [], onProgress, signal, 1)
+  const tracks = [...matched, ...built.tracks]
+  await saveBuiltLibrary(tracks, built.scanned)
+  return tracks
 }
 
   return {

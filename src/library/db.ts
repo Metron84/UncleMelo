@@ -27,6 +27,11 @@ const directoryKey = "directory"
 const lastTrackKey = "lastTrackId"
 const modeKey = "mode"
 
+export type ImportRecord = {
+  path: string
+  size: number
+}
+
 const stores = {
   tracks: "id, genre, decade, artist, *collections",
   settings: "key",
@@ -39,6 +44,7 @@ class UncleMeloDB extends Dexie {
   covers!: Table<CoverRecord, string>
   plays!: Table<PlayRecord, number>
   scanned!: Table<ScannedFile, string>
+  imports!: Table<ImportRecord, string>
 
   constructor() {
     super("unclemelo")
@@ -51,6 +57,9 @@ class UncleMeloDB extends Dexie {
       ...stores,
       plays: "++id, trackId, startedAt, mode",
       scanned: "path",
+    })
+    this.version(4).stores({
+      imports: "path",
     })
   }
 }
@@ -101,6 +110,14 @@ export async function replaceTracks(tracks: TrackRecord[]) {
 
 export async function loadScanned() {
   return db.scanned.toArray()
+}
+
+export async function loadImported() {
+  return db.imports.toArray()
+}
+
+export async function saveImported(path: string, size: number) {
+  await db.imports.put({ path, size })
 }
 
 export async function saveJsonLibrary(tracks: TrackRecord[]) {
