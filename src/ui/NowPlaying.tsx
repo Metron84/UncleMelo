@@ -1,16 +1,17 @@
-import { useState, type ReactNode } from "react"
+import type { ReactNode } from "react"
 import type { ThemeName } from "../app/theme.ts"
+import type { ListeningMode } from "../brain/pick.ts"
 import { genreCover } from "../library/browse.ts"
 import type { TrackRecord } from "../library/types.ts"
-
-const modes = ["Late Night", "Drive", "Focus", "Pre-match"] as const
-type Mode = (typeof modes)[number]
 
 type NowPlayingProps = {
   theme: ThemeName
   onToggleTheme: () => void
+  mode: ListeningMode
+  onCycleMode: () => void
   track: TrackRecord | null
   next: TrackRecord | null
+  nextReason: string
   playing: boolean
   elapsed: number
   duration: number
@@ -32,8 +33,11 @@ function formatTime(seconds: number) {
 export function NowPlaying({
   theme,
   onToggleTheme,
+  mode,
+  onCycleMode,
   track,
   next,
+  nextReason,
   playing,
   elapsed,
   duration,
@@ -44,14 +48,9 @@ export function NowPlaying({
   onNext,
   onOpenLibrary,
 }: NowPlayingProps) {
-  const [mode, setMode] = useState<Mode>("Late Night")
   const colour = genreCover(track?.genre ?? "")
   const remaining = Math.max(0, duration - elapsed)
   const progress = duration === 0 ? 0 : Math.min(100, (elapsed / duration) * 100)
-
-  function cycleMode() {
-    setMode((current) => modes[(modes.indexOf(current) + 1) % modes.length])
-  }
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-[480px] flex-col bg-bg px-6 text-text">
@@ -62,7 +61,7 @@ export function NowPlaying({
             type="button"
             className="grid h-11 place-items-center px-1"
             aria-label={`Listening mode ${mode}. Change mode.`}
-            onClick={cycleMode}
+            onClick={onCycleMode}
           >
             <span className="flex h-8 items-center rounded-full border border-line px-3 text-meta text-muted">
               {mode}
@@ -140,6 +139,7 @@ export function NowPlaying({
           <>
             <p className="mt-3 text-body">{next.title}</p>
             <p className="text-meta text-muted">{next.artist}</p>
+            {nextReason && <p className="text-meta text-muted">{nextReason}</p>}
           </>
         )}
       </div>

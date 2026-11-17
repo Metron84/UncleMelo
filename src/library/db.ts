@@ -11,20 +11,39 @@ type CoverRecord = {
   blob: Blob
 }
 
+export type PlayRecord = {
+  id?: number
+  trackId: string
+  startedAt: number
+  playedSeconds: number
+  completed: boolean
+  skipped: boolean
+  hour: number
+  mode: string
+}
+
 const directoryKey = "directory"
 const lastTrackKey = "lastTrackId"
+const modeKey = "mode"
+
+const stores = {
+  tracks: "id, genre, decade, artist, *collections",
+  settings: "key",
+  covers: "id",
+}
 
 class UncleMeloDB extends Dexie {
   tracks!: Table<TrackRecord, string>
   settings!: Table<SettingRecord, string>
   covers!: Table<CoverRecord, string>
+  plays!: Table<PlayRecord, number>
 
   constructor() {
     super("unclemelo")
-    this.version(1).stores({
-      tracks: "id, genre, decade, artist, *collections",
-      settings: "key",
-      covers: "id",
+    this.version(1).stores(stores)
+    this.version(2).stores({
+      ...stores,
+      plays: "++id, trackId, startedAt, mode",
     })
   }
 }
@@ -47,6 +66,23 @@ export async function saveLastTrackId(id: string) {
 export async function loadLastTrackId() {
   const row = await db.settings.get(lastTrackKey)
   return typeof row?.value === "string" ? row.value : null
+}
+
+export async function saveMode(mode: string) {
+  await db.settings.put({ key: modeKey, value: mode })
+}
+
+export async function loadMode() {
+  const row = await db.settings.get(modeKey)
+  return typeof row?.value === "string" ? row.value : null
+}
+
+export async function recordPlay(play: PlayRecord) {
+  await db.plays.add(play)
+}
+
+export async function loadPlays() {
+  return db.plays.orderBy("startedAt").toArray()
 }
 
 export async function replaceTracks(tracks: TrackRecord[]) {

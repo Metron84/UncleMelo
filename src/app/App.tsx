@@ -39,8 +39,11 @@ export default function App() {
       <NowPlaying
         theme={theme}
         onToggleTheme={toggleTheme}
+        mode={playback.mode}
+        onCycleMode={playback.cycleMode}
         track={playback.track}
         next={playback.next}
+        nextReason={playback.nextReason}
         playing={playback.playing}
         elapsed={playback.elapsed}
         duration={playback.duration}
@@ -60,6 +63,10 @@ export default function App() {
           onClose={() => setLibraryOpen(false)}
           onPlay={playback.playList}
           onRescan={() => void library.rescan()}
+          onLetUncleChoose={() => {
+            playback.letUncleChoose()
+            setLibraryOpen(false)
+          }}
         />
       )}
     </>

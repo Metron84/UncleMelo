@@ -10,9 +10,10 @@ type LibrarySheetProps = {
   onClose: () => void
   onPlay: (list: TrackRecord[], index: number) => void
   onRescan: () => void
+  onLetUncleChoose: () => void
 }
 
-export function LibrarySheet({ tracks, currentId, busy, message, onClose, onPlay, onRescan }: LibrarySheetProps) {
+export function LibrarySheet({ tracks, currentId, busy, message, onClose, onPlay, onRescan, onLetUncleChoose }: LibrarySheetProps) {
   const [mode, setMode] = useState<BrowseMode>("Genre")
   const [query, setQuery] = useState("")
   const [group, setGroup] = useState<LibraryGroup | null>(null)
@@ -65,6 +66,9 @@ export function LibrarySheet({ tracks, currentId, busy, message, onClose, onPlay
             {busy ? "Reading" : "Rescan"}
           </button>
         </div>
+        <button type="button" className="mx-6 mt-3 h-11 self-start text-left text-body text-accent" onClick={onLetUncleChoose}>
+          Let Uncle choose
+        </button>
         {message && <p className="px-6 pt-2 text-meta text-muted">{message}</p>}
         <div className="px-6 pt-4">
           <input
