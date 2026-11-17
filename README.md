@@ -1,1 +1,1 @@
-UncleMelo is a calm, offline-first personal music player. This first shell is the Now Playing screen, with a late-night and daylight theme and three placeholder tracks that will later be replaced by a private library kept on this machine.
+UncleMelo is a calm, offline-first personal music player. You point it at a music folder on this machine once. It browses that library by genre, decade, artist, and collection, and plays the files where they already live.

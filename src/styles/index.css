@@ -32,12 +32,16 @@
     color: var(--text);
   }
 
-  button {
+  button,
+  input {
     border: 0;
     padding: 0;
     background: none;
     color: inherit;
     font: inherit;
+  }
+
+  button {
     cursor: pointer;
   }
 

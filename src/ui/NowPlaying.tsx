@@ -1,19 +1,7 @@
-import { useEffect, useState, type ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 import type { ThemeName } from "../app/theme.ts"
-import { categories } from "../library/categories.ts"
-
-type Track = {
-  title: string
-  artist: string
-  cover: string
-  duration: number
-}
-
-const tracks: readonly Track[] = [
-  { title: "Evening Window", artist: "Field Notes", cover: categories[3].cover, duration: 214 },
-  { title: "Slow Current", artist: "North Room", cover: categories[1].cover, duration: 186 },
-  { title: "Late Kick", artist: "MrMelo", cover: categories[4].cover, duration: 241 },
-]
+import { genreCover } from "../library/browse.ts"
+import type { TrackRecord } from "../library/types.ts"
 
 const modes = ["Late Night", "Drive", "Focus", "Pre-match"] as const
 type Mode = (typeof modes)[number]
@@ -21,6 +9,17 @@ type Mode = (typeof modes)[number]
 type NowPlayingProps = {
   theme: ThemeName
   onToggleTheme: () => void
+  track: TrackRecord | null
+  next: TrackRecord | null
+  playing: boolean
+  elapsed: number
+  duration: number
+  coverUrl: string | null
+  notice: string | null
+  onToggle: () => void
+  onPrevious: () => void
+  onNext: () => void
+  onOpenLibrary: () => void
 }
 
 function formatTime(seconds: number) {
@@ -30,35 +29,25 @@ function formatTime(seconds: number) {
   return `${minutes}:${remainder.toString().padStart(2, "0")}`
 }
 
-export function NowPlaying({ theme, onToggleTheme }: NowPlayingProps) {
-  const [index, setIndex] = useState(0)
-  const [playing, setPlaying] = useState(false)
-  const [elapsed, setElapsed] = useState(0)
+export function NowPlaying({
+  theme,
+  onToggleTheme,
+  track,
+  next,
+  playing,
+  elapsed,
+  duration,
+  coverUrl,
+  notice,
+  onToggle,
+  onPrevious,
+  onNext,
+  onOpenLibrary,
+}: NowPlayingProps) {
   const [mode, setMode] = useState<Mode>("Late Night")
-
-  const track = tracks[index]
-  const next = tracks[(index + 1) % tracks.length]
-  const remaining = Math.max(0, track.duration - elapsed)
-  const progress = track.duration === 0 ? 0 : Math.min(100, (elapsed / track.duration) * 100)
-
-  useEffect(() => {
-    if (!playing) return
-    const id = window.setInterval(() => {
-      setElapsed((value) => {
-        if (value + 0.25 >= track.duration) {
-          setIndex((current) => (current + 1) % tracks.length)
-          return 0
-        }
-        return value + 0.25
-      })
-    }, 250)
-    return () => window.clearInterval(id)
-  }, [playing, track.duration])
-
-  function go(step: number) {
-    setIndex((current) => (current + step + tracks.length) % tracks.length)
-    setElapsed(0)
-  }
+  const colour = genreCover(track?.genre ?? "")
+  const remaining = Math.max(0, duration - elapsed)
+  const progress = duration === 0 ? 0 : Math.min(100, (elapsed / duration) * 100)
 
   function cycleMode() {
     setMode((current) => modes[(modes.indexOf(current) + 1) % modes.length])
@@ -93,21 +82,26 @@ export function NowPlaying({ theme, onToggleTheme }: NowPlayingProps) {
       <div className="relative mx-auto mt-[52px] h-[282px] w-[282px]">
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute left-1/2 top-1/2 h-[280px] w-[280px] -translate-x-1/2 -translate-y-1/2 rounded-full blur-[70px] transition-opacity duration-theme ease-theme"
-          style={{ background: track.cover, opacity: theme === "night" ? 0.32 : 0.22 }}
-        />
-        <div className="relative h-full w-full rounded-card shadow-art" style={{ background: track.cover }} />
+          className="pointer-events-none absolute left-1/2 top-1/2 h-[280px] w-[280px] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-full blur-[70px] transition-opacity duration-theme ease-theme"
+          style={{ background: colour, opacity: theme === "night" ? 0.32 : 0.22 }}
+        >
+          {coverUrl && <img src={coverUrl} alt="" className="h-full w-full object-cover" />}
+        </div>
+        <div className="relative h-full w-full overflow-hidden rounded-card shadow-art" style={{ background: colour }}>
+          {coverUrl && <img src={coverUrl} alt="" className="h-full w-full object-cover" />}
+        </div>
       </div>
 
-      <h1 className="mt-10 text-title font-medium">{track.title}</h1>
-      <p className="text-body text-muted">{track.artist}</p>
+      <h1 className="mt-10 text-title font-medium">{track?.title ?? "Nothing playing"}</h1>
+      <p className="text-body text-muted">{track?.artist ?? "Open the library to choose a song"}</p>
+      {notice && <p className="mt-2 text-meta text-muted">{notice}</p>}
 
       <div className="mt-7">
         <div
           className="h-[3px] overflow-hidden rounded-full bg-line"
           role="progressbar"
           aria-valuemin={0}
-          aria-valuemax={track.duration}
+          aria-valuemax={Math.max(0, Math.round(duration))}
           aria-valuenow={Math.floor(elapsed)}
           aria-label="Playback progress"
         >
@@ -120,18 +114,19 @@ export function NowPlaying({ theme, onToggleTheme }: NowPlayingProps) {
       </div>
 
       <div className="mt-[22px] flex items-center justify-center gap-9">
-        <button type="button" className="grid h-[52px] w-[52px] place-items-center" aria-label="Previous track" onClick={() => go(-1)}>
+        <button type="button" className="grid h-[52px] w-[52px] place-items-center" aria-label="Previous track" onClick={onPrevious} disabled={!track}>
           <PreviousIcon />
         </button>
         <button
           type="button"
-          className="grid h-[68px] w-[68px] place-items-center rounded-full bg-accent text-on-accent"
+          className="grid h-[68px] w-[68px] place-items-center rounded-full bg-accent text-on-accent disabled:opacity-60"
           aria-label={playing ? "Pause" : "Play"}
-          onClick={() => setPlaying((value) => !value)}
+          onClick={onToggle}
+          disabled={!track}
         >
           {playing ? <PauseIcon /> : <PlayIcon />}
         </button>
-        <button type="button" className="grid h-[52px] w-[52px] place-items-center" aria-label="Next track" onClick={() => go(1)}>
+        <button type="button" className="grid h-[52px] w-[52px] place-items-center" aria-label="Next track" onClick={onNext} disabled={!track}>
           <NextIcon />
         </button>
       </div>
@@ -141,12 +136,16 @@ export function NowPlaying({ theme, onToggleTheme }: NowPlayingProps) {
           Uncle's pick
           <span className="mt-1 block">up next</span>
         </p>
-        <p className="mt-3 text-body">{next.title}</p>
-        <p className="text-meta text-muted">{next.artist}</p>
+        {next && (
+          <>
+            <p className="mt-3 text-body">{next.title}</p>
+            <p className="text-meta text-muted">{next.artist}</p>
+          </>
+        )}
       </div>
 
       <div className="flex justify-center pb-6 pt-6">
-        <button type="button" className="flex h-11 w-40 flex-col items-center justify-center gap-1.5" aria-label="Library">
+        <button type="button" className="flex h-11 w-40 flex-col items-center justify-center gap-1.5" aria-label="Library" onClick={onOpenLibrary}>
           <span className="h-1 w-10 rounded-full bg-line" aria-hidden="true" />
           <span className="text-meta text-muted">Library</span>
         </button>
