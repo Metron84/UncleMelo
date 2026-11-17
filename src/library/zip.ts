@@ -14,7 +14,7 @@ export function pathInsideZip(entryName: string, zipFileName: string) {
 
 export async function readZip(
   file: File,
-  onAudio: (path: string, data: Uint8Array) => Promise<void>,
+  onAudio: (path: string, data: Uint8Array | null, final: boolean) => Promise<void>,
   onProgress: (read: number, total: number) => void,
   signal: AbortSignal,
 ) {
@@ -25,28 +25,30 @@ export async function readZip(
   let chain = Promise.resolve()
   let failed: Error | null = null
   let libraryText: string | null = null
+  const libraryChunks: Uint8Array[] = []
 
   unzip.onfile = (entry) => {
     const path = pathInsideZip(entry.name, file.name)
-    const chunks: Uint8Array[] = []
+    const library = path === "library.json" || path?.endsWith("/library.json") === true
+    const extension = path?.split(".").pop()?.toLocaleLowerCase() ?? ""
+    const audio = path !== null && audioExtensions.has(extension)
     entry.ondata = (error, data, final) => {
       if (failed) return
       if (error) {
         failed = error instanceof Error ? error : new Error("That zip couldn't be read.")
         return
       }
-      if (data.length > 0) chunks.push(data.slice())
-      if (!final || !path) return
-      const bytes = joinChunks(chunks)
+      const piece = data.byteLength > 0 ? data.slice() : null
       chain = chain.then(async () => {
         if (signal.aborted) throw new ScanCancelled()
-        if (path === "library.json" || path.endsWith("/library.json")) {
-          libraryText = new TextDecoder().decode(bytes)
+        if (!path) return
+        if (library) {
+          if (piece) libraryChunks.push(piece)
+          if (final) libraryText = new TextDecoder().decode(joinChunks(libraryChunks))
           return
         }
-        const extension = path.split(".").pop()?.toLocaleLowerCase() ?? ""
-        if (!audioExtensions.has(extension)) return
-        await onAudio(path, bytes)
+        if (!audio) return
+        await onAudio(path, piece, final)
       })
     }
     try {
@@ -58,19 +60,24 @@ export async function readZip(
 
   const reader = file.stream().getReader()
   let read = 0
-  while (true) {
-    if (signal.aborted) throw new ScanCancelled()
-    const chunk = await reader.read()
-    if (chunk.done) {
-      unzip.push(new Uint8Array(), true)
-      break
+  try {
+    while (true) {
+      if (signal.aborted) throw new ScanCancelled()
+      const chunk = await reader.read()
+      if (chunk.done) {
+        unzip.push(new Uint8Array(), true)
+        await chain
+        break
+      }
+      read += chunk.value.byteLength
+      onProgress(read, file.size)
+      unzip.push(chunk.value, false)
+      await chain
+      if (failed) throw failed
     }
-    read += chunk.value.byteLength
-    onProgress(read, file.size)
-    unzip.push(chunk.value, false)
-    if (failed) throw failed
+  } finally {
+    reader.releaseLock()
   }
-  await chain
   if (failed) throw failed
   if (signal.aborted) throw new ScanCancelled()
   return { libraryText }

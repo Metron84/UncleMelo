@@ -18,8 +18,8 @@ describe("zip library", () => {
     })
     const file = new File([zipped], "UncleMelo Music.zip")
     const songs: string[] = []
-    const result = await readZip(file, async (path) => {
-      songs.push(path)
+    const result = await readZip(file, async (path, _data, final) => {
+      if (final) songs.push(path)
     }, () => {}, new AbortController().signal)
     expect(songs).toEqual(["Feist/Mushaboom.mp3"])
     expect(result.libraryText).toContain("tracks")

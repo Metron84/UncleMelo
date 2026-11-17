@@ -10,12 +10,40 @@ export async function clearPhoneMusic() {
 }
 
 export async function writePhoneFile(path: string, data: Uint8Array) {
-  const handle = await fileHandle(path, true)
-  const writable = await handle.createWritable()
-  const copy = new Uint8Array(data.byteLength)
-  copy.set(data)
-  await writable.write(copy)
-  await writable.close()
+  const writer = openPhoneWriter()
+  await writer.write(path, data, true)
+  await writer.close()
+}
+
+export function openPhoneWriter() {
+  let currentPath = ""
+  let writable: FileSystemWritableFileStream | null = null
+
+  return {
+    async write(path: string, data: Uint8Array | null, final: boolean) {
+      if (currentPath !== path || !writable) {
+        if (writable) await writable.close()
+        writable = await (await fileHandle(path, true)).createWritable()
+        currentPath = path
+      }
+      if (data && data.byteLength > 0) {
+        const copy = new Uint8Array(data.byteLength)
+        copy.set(data)
+        await writable.write(copy)
+      }
+      if (final) {
+        await writable.close()
+        writable = null
+        currentPath = ""
+      }
+    },
+    async close() {
+      if (!writable) return
+      await writable.close()
+      writable = null
+      currentPath = ""
+    },
+  }
 }
 
 export async function phoneFile(path: string) {

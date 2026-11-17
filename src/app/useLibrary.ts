@@ -19,7 +19,7 @@ import {
   supportsDirectoryPicker,
   tracksInLibraryDocument,
 } from "../library/folder.ts"
-import { clearPhoneMusic, listPhoneFiles, phoneStorageAvailable, writePhoneFile } from "../library/phone.ts"
+import { clearPhoneMusic, listPhoneFiles, openPhoneWriter, phoneStorageAvailable, writePhoneFile } from "../library/phone.ts"
 import type { TrackRecord } from "../library/types.ts"
 import { readZip } from "../library/zip.ts"
 
@@ -172,22 +172,27 @@ export function useLibrary() {
       await clearPhoneMusic()
       let libraryText: string | null = null
       for (const zip of zips) {
-        const saved = await readZip(
-          zip,
-          async (path, data) => {
-            await writePhoneFile(path, data)
-          },
-          (read, total) => {
-            const scale = 1024 * 1024
-            setProgress({
-              done: Math.round(read / scale),
-              total: Math.max(1, Math.round(total / scale)),
-              label: "Saving your music",
-            })
-          },
-          controller.signal,
-        )
-        libraryText = saved.libraryText ?? libraryText
+        const writer = openPhoneWriter()
+        try {
+          const saved = await readZip(
+            zip,
+            async (path, data, final) => {
+              await writer.write(path, data, final)
+            },
+            (read, total) => {
+              const scale = 1024 * 1024
+              setProgress({
+                done: Math.round(read / scale),
+                total: Math.max(1, Math.round(total / scale)),
+                label: "Saving your music",
+              })
+            },
+            controller.signal,
+          )
+          libraryText = saved.libraryText ?? libraryText
+        } finally {
+          await writer.close()
+        }
       }
       for (const entry of loose) {
         await writePhoneFile(entry.path, new Uint8Array(await entry.file.arrayBuffer()))
