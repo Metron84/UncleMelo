@@ -2,6 +2,7 @@ export type TrackRecord = {
   id: string
   title: string
   artist: string
+  primaryArtist?: string
   album: string
   year: number | null
   duration: number

@@ -92,6 +92,10 @@ export async function replaceTracks(tracks: TrackRecord[]) {
   })
 }
 
+export async function loadAllCovers() {
+  return db.covers.toArray()
+}
+
 export async function loadCover(id: string) {
   const row = await db.covers.get(id)
   return row?.blob ?? null

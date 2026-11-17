@@ -16,7 +16,7 @@ import {
 } from "../engine/player.ts"
 import { artworkFor, genreSquareUrl } from "../library/artwork.ts"
 import { genreCover, sortLibrary } from "../library/browse.ts"
-import { loadLastTrackId, loadMode, loadPlays, recordPlay, saveLastTrackId, saveMode, type PlayRecord } from "../library/db.ts"
+import { loadAllCovers, loadLastTrackId, loadMode, loadPlays, recordPlay, saveLastTrackId, saveMode, type PlayRecord } from "../library/db.ts"
 import { readPermission, resolveTrackFile } from "../library/folder.ts"
 import type { TrackRecord } from "../library/types.ts"
 
@@ -46,6 +46,10 @@ export function usePlayback(
   const [duration, setDuration] = useState(0)
   const [coverUrl, setCoverUrl] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [ahead, setAhead] = useState<TrackRecord[]>([])
+  const [scope, setScope] = useState<TrackRecord[] | null>(null)
+  const [scopePlayed, setScopePlayed] = useState<string[]>([])
+  const [art, setArt] = useState<Record<string, string>>({})
 
   const directoryRef = useRef(directory)
   const tracksRef = useRef(tracks)
@@ -56,6 +60,8 @@ export function usePlayback(
   const endlessRef = useRef(endless)
   const modeRef = useRef(mode)
   const historyRef = useRef(history)
+  const aheadRef = useRef(ahead)
+  const scopeRef = useRef(scope)
   const sessionRef = useRef<Session | null>(null)
   const armedRef = useRef<TrackRecord | null>(null)
   const coversRef = useRef(new Map<string, CoverArt>())
@@ -70,12 +76,16 @@ export function usePlayback(
   })
 
   const upcoming = useMemo(() => {
+    if (ahead[0]) return { track: ahead[0], reason: "" }
     const queued = !endless && queue[index + 1] ? queue[index + 1] : null
     if (queued) return { track: queued, reason: "" }
     if (!current) return { track: null as TrackRecord | null, reason: "" }
-    const choice = pickNext(current, tracks, history, mode, Date.now())
+    const played = new Set(scopePlayed)
+    const remaining = scope?.filter((track) => track.id !== current.id && !played.has(track.id)) ?? null
+    const pool = remaining && remaining.length > 0 ? remaining : tracks
+    const choice = pickNext(current, pool, history, mode, Date.now())
     return { track: choice?.track ?? null, reason: choice?.reason ?? "" }
-  }, [endless, queue, index, current, tracks, history, mode])
+  }, [ahead, endless, queue, index, current, tracks, history, mode, scope, scopePlayed])
 
   useEffect(() => {
     directoryRef.current = directory
@@ -87,6 +97,8 @@ export function usePlayback(
     endlessRef.current = endless
     modeRef.current = mode
     historyRef.current = history
+    aheadRef.current = ahead
+    scopeRef.current = scope
     lostAccess.current = onPermissionLost
     bridge.current.next = () => void skip(1)
     bridge.current.previous = () => void skip(-1)
@@ -102,7 +114,7 @@ export function usePlayback(
     if (tracks.length === 0 || booted.current) return
     let live = true
     Promise.all([loadLastTrackId(), loadMode(), loadPlays()])
-      .then(([last, savedMode, plays]) => {
+      .then(async ([last, savedMode, plays]) => {
         if (!live) return
         const sorted = sortLibrary(tracks)
         const found = last ? sorted.findIndex((track) => track.id === last) : 0
@@ -112,6 +124,15 @@ export function usePlayback(
           setMode(savedMode)
         }
         setHistory(plays)
+        const covers = await loadAllCovers()
+        if (!live) return
+        const urls: Record<string, string> = {}
+        for (const cover of covers) {
+          const url = URL.createObjectURL(cover.blob)
+          urls[cover.id] = url
+          coversRef.current.set(cover.id, { url, type: cover.blob.type || "image/jpeg" })
+        }
+        setArt(urls)
         setQueue(sorted)
         setIndex(start)
         setCurrent(sorted[start] ?? null)
@@ -195,6 +216,7 @@ export function usePlayback(
     if (previous?.url.startsWith("blob:")) URL.revokeObjectURL(previous.url)
     const art = { url: URL.createObjectURL(blob), type: blob.type || "image/jpeg" }
     coversRef.current.set(track.id, art)
+    setArt((existing) => ({ ...existing, [track.id]: art.url }))
     if (currentRef.current?.id === track.id) {
       setCoverUrl(art.url)
       publishSession(track)
@@ -233,7 +255,15 @@ export function usePlayback(
     if (!info.fresh) logLeave(info.position, info.duration, info.how)
     const armed = armedRef.current
     if (!armed) return
-    if (info.how === "natural") {
+    if (scopeRef.current?.some((track) => track.id === armed.id)) {
+      setScopePlayed((ids) => (ids.includes(armed.id) ? ids : [...ids, armed.id]))
+    }
+    const consumedAhead = aheadRef.current[0]?.id === armed.id
+    if (consumedAhead) {
+      const rest = aheadRef.current.slice(1)
+      aheadRef.current = rest
+      setAhead(rest)
+    } else if (info.how === "natural") {
       const list = queueRef.current
       const at = indexRef.current
       const queued = !endlessRef.current ? list[at + 1] : undefined
@@ -291,10 +321,36 @@ export function usePlayback(
     }
   }
 
+  function clearPlans() {
+  aheadRef.current = []
+  setAhead([])
+  scopeRef.current = null
+  setScope(null)
+  setScopePlayed([])
+}
+
+  async function playInserted(track: TrackRecord) {
+    setNotice(null)
+    const file = await resolveTrack(track)
+    if (!file) return
+    armedRef.current = track
+    try {
+      await playFile(file)
+      void warmCover(track, file)
+    } catch {
+      setNotice("That song couldn't be opened.")
+      setPlaying(false)
+    }
+  }
+
   async function skip(step: number) {
     if (step < 0 && playbackTime() > 5) {
       restartTrack()
       setElapsed(0)
+      return
+    }
+    if (step > 0 && aheadRef.current[0]) {
+      await playInserted(aheadRef.current[0])
       return
     }
     const list = queueRef.current
@@ -347,6 +403,7 @@ export function usePlayback(
   }
 
   function letUncleChoose() {
+    clearPlans()
     endlessRef.current = true
     setEndless(true)
     const choice = pickNext(currentRef.current, tracksRef.current, historyRef.current, modeRef.current, Date.now())
@@ -356,10 +413,32 @@ export function usePlayback(
 
   function playList(list: TrackRecord[], at: number) {
     if (list.length === 0) return
+    clearPlans()
     endlessRef.current = false
     setEndless(false)
     const safe = Math.min(Math.max(at, 0), list.length - 1)
     void goTo(list[safe], list, safe)
+  }
+
+  function rememberQueue(track: TrackRecord, where: "next" | "end") {
+    const without = aheadRef.current.filter((item) => item.id !== track.id)
+    const next = where === "next" ? [track, ...without] : [...without, track]
+    aheadRef.current = next
+    setAhead(next)
+  }
+
+  function shuffleGroup(list: TrackRecord[]) {
+    if (list.length === 0) return
+    aheadRef.current = []
+    setAhead([])
+    scopeRef.current = list
+    setScope(list)
+    setScopePlayed([])
+    endlessRef.current = true
+    setEndless(true)
+    const choice = pickNext(currentRef.current, list, historyRef.current, modeRef.current, Date.now())
+    if (!choice) return
+    void goTo(choice.track, [choice.track], 0)
   }
 
   return {
@@ -376,6 +455,11 @@ export function usePlayback(
     previous: () => void skip(-1),
     nextTrack: () => void skip(1),
     playList,
+    playNext: (track: TrackRecord) => rememberQueue(track, "next"),
+    addToQueue: (track: TrackRecord) => rememberQueue(track, "end"),
+    shuffleGroup,
+    art,
+    history,
     cycleMode,
     letUncleChoose,
   }

@@ -21,6 +21,7 @@ type NowPlayingProps = {
   onPrevious: () => void
   onNext: () => void
   onOpenLibrary: () => void
+  showLibrary?: boolean
 }
 
 function formatTime(seconds: number) {
@@ -47,6 +48,7 @@ export function NowPlaying({
   onPrevious,
   onNext,
   onOpenLibrary,
+  showLibrary = true,
 }: NowPlayingProps) {
   const colour = genreCover(track?.genre ?? "")
   const remaining = Math.max(0, duration - elapsed)
@@ -144,12 +146,14 @@ export function NowPlaying({
         )}
       </div>
 
-      <div className="flex justify-center pb-6 pt-6">
-        <button type="button" className="flex h-11 w-40 flex-col items-center justify-center gap-1.5" aria-label="Library" onClick={onOpenLibrary}>
-          <span className="h-1 w-10 rounded-full bg-line" aria-hidden="true" />
-          <span className="text-meta text-muted">Library</span>
-        </button>
-      </div>
+      {showLibrary && (
+        <div className="flex justify-center pb-6 pt-6">
+          <button type="button" className="flex h-11 w-40 flex-col items-center justify-center gap-1.5" aria-label="Library" onClick={onOpenLibrary}>
+            <span className="h-1 w-10 rounded-full bg-line" aria-hidden="true" />
+            <span className="text-meta text-muted">Library</span>
+          </button>
+        </div>
+      )}
     </main>
   )
 }

@@ -1,10 +1,11 @@
+import type { PlayHistory } from "../brain/pick.ts"
 import type { TrackRecord } from "./types.ts"
 
 export type BrowseMode = "Genre" | "Decade" | "Artist" | "Collections"
 
 export const browseModes: readonly BrowseMode[] = ["Genre", "Decade", "Artist", "Collections"]
 
-const genres = [
+export const genres = [
   { name: "Folk", cover: "#7A6440" },
   { name: "Singer-Songwriter", cover: "#8A6A3B" },
   { name: "Indie Folk", cover: "#5E6B45" },
@@ -59,7 +60,7 @@ export function searchTracks(tracks: readonly TrackRecord[], query: string) {
 export function buildGroups(tracks: readonly TrackRecord[], mode: BrowseMode): LibraryGroup[] {
   if (mode === "Genre") return genreGroups(tracks)
   if (mode === "Decade") return namedGroups(tracks, (track) => track.decade, decadeOrder)
-  if (mode === "Artist") return namedGroups(tracks, (track) => track.artist, artistOrder)
+  if (mode === "Artist") return artistGroups(tracks)
   return collectionGroups(tracks)
 }
 
@@ -119,6 +120,98 @@ function bucket(tracks: readonly TrackRecord[], key: (track: TrackRecord) => str
     else map.set(name, [track])
   }
   return map
+}
+
+export function displayArtist(track: TrackRecord) {
+  const named = track.primaryArtist?.trim()
+  return named || track.artist
+}
+
+export function decadesNewest(tracks: readonly TrackRecord[]) {
+  return decadeOrder([...new Set(tracks.map((track) => track.decade).filter(Boolean))])
+}
+
+export function genresPresent(tracks: readonly TrackRecord[]) {
+  const names = new Set(tracks.map((track) => track.genre))
+  return genres.filter((genre) => names.has(genre.name)).map((genre) => genre.name)
+}
+
+export type HomeList = "Recently played" | "Most played" | "Rediscover"
+
+const DAY = 24 * 60 * 60 * 1000
+
+export function homeTracks(
+  kind: HomeList,
+  tracks: readonly TrackRecord[],
+  history: readonly PlayHistory[],
+  now: number,
+) {
+  const byId = new Map(tracks.map((track) => [track.id, track]))
+  if (kind === "Recently played") {
+    const seen = new Set<string>()
+    const list: TrackRecord[] = []
+    for (const play of [...history].sort((a, b) => b.startedAt - a.startedAt)) {
+      if (seen.has(play.trackId)) continue
+      seen.add(play.trackId)
+      const track = byId.get(play.trackId)
+      if (track) list.push(track)
+    }
+    return list
+  }
+  if (kind === "Most played") {
+    const counts = new Map<string, number>()
+    for (const play of history) counts.set(play.trackId, (counts.get(play.trackId) ?? 0) + 1)
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([id]) => byId.get(id) ?? null)
+      .filter((track): track is TrackRecord => track !== null)
+  }
+  const grouped = new Map<string, PlayHistory[]>()
+  for (const play of history) {
+    const list = grouped.get(play.trackId)
+    if (list) list.push(play)
+    else grouped.set(play.trackId, [play])
+  }
+  return [...grouped.entries()]
+    .map(([id, plays]) => {
+      const track = byId.get(id)
+      if (!track) return null
+      const completed = plays.filter((play) => play.completed).length / plays.length
+      const last = plays.reduce((latest, play) => Math.max(latest, play.startedAt), 0)
+      if (completed < 0.7 || now - last < 30 * DAY) return null
+      return { track, last }
+    })
+    .filter((item): item is { track: TrackRecord; last: number } => item !== null)
+    .sort((a, b) => a.last - b.last)
+    .map((item) => item.track)
+}
+
+export function artistLetter(name: string) {
+  const char = [...name.trim()][0]?.toLocaleUpperCase() ?? "#"
+  return /[A-Z]/.test(char) ? char : "#"
+}
+
+export function artistInitial(name: string) {
+  return [...name.trim()][0]?.toLocaleUpperCase() ?? "#"
+}
+
+function artistGroups(tracks: readonly TrackRecord[]) {
+  const map = bucket(tracks, displayArtist)
+  return artistOrder([...map.keys()]).map((name) => groupFrom(name, map.get(name) ?? [], dominantCover(map.get(name) ?? [])))
+}
+
+function dominantCover(tracks: readonly TrackRecord[]) {
+  const counts = new Map<string, number>()
+  for (const track of tracks) counts.set(track.genre, (counts.get(track.genre) ?? 0) + 1)
+  let best = ""
+  let count = 0
+  for (const [genre, total] of counts) {
+    if (total > count) {
+      best = genre
+      count = total
+    }
+  }
+  return genreCover(best)
 }
 
 function decadeOrder(names: string[]) {

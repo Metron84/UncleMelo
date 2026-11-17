@@ -113,6 +113,7 @@ function asTrack(value: unknown): TrackRecord | null {
     id: row.id,
     title: typeof row.title === "string" ? row.title : "Untitled",
     artist: typeof row.artist === "string" ? row.artist : "Unknown",
+    primaryArtist: typeof row.primaryArtist === "string" ? row.primaryArtist : undefined,
     album: typeof row.album === "string" ? row.album : "",
     year: typeof row.year === "number" ? row.year : null,
     duration: typeof row.duration === "number" ? row.duration : 0,
