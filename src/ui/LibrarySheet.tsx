@@ -123,7 +123,7 @@ export function LibraryPanel(props: LibraryPanelProps) {
         </div>
         {props.progress && (
           <div className="px-6">
-            <ReadingProgress done={props.progress.done} total={props.progress.total} onCancel={props.onCancelScan} />
+            <ReadingProgress done={props.progress.done} total={props.progress.total} label={props.progress.label} onCancel={props.onCancelScan} />
           </div>
         )}
         <button type="button" className="mx-6 mt-1 h-11 text-left text-body text-accent" onClick={props.onLetUncleChoose}>

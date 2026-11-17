@@ -7,6 +7,7 @@ export const scanBatchSize = 20
 export type ScanProgress = {
   done: number
   total: number
+  label?: string
 }
 
 export type FileEntry = {

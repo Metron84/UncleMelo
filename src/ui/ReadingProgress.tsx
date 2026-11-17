@@ -1,9 +1,19 @@
-export function ReadingProgress({ done, total, onCancel }: { done: number; total: number; onCancel: () => void }) {
+export function ReadingProgress({
+  done,
+  total,
+  label = "Reading your music",
+  onCancel,
+}: {
+  done: number
+  total: number
+  label?: string
+  onCancel: () => void
+}) {
   const pct = total === 0 ? 0 : Math.min(100, (done / total) * 100)
   return (
     <div className="mt-6">
       <p className="text-body">
-        Reading your music · {done} of {total}
+        {label} · {done} of {total}
       </p>
       <div
         className="mt-3 h-[3px] overflow-hidden rounded-full bg-line"

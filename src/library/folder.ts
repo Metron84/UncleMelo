@@ -43,10 +43,9 @@ export async function readLibraryJson(root: FileSystemDirectoryHandle) {
   if (!handle) return null
   try {
     const data: unknown = JSON.parse(await (await handle.getFile()).text())
-    if (!data || typeof data !== "object" || !("tracks" in data) || !Array.isArray(data.tracks)) {
-      throw new FolderAccessError()
-    }
-    return data.tracks.map(asTrack).filter((track): track is TrackRecord => track !== null)
+    const tracks = tracksInLibraryDocument(data)
+    if (!tracks) throw new FolderAccessError()
+    return tracks
   } catch (error) {
     if (error instanceof FolderAccessError) throw error
     throw new FolderAccessError()
@@ -113,6 +112,13 @@ async function tryFile(directory: FileSystemDirectoryHandle, name: string) {
 
 function sameName(left: string, right: string) {
   return left.normalize("NFC") === right.normalize("NFC")
+}
+
+export function tracksInLibraryDocument(data: unknown): TrackRecord[] | null {
+  if (!data || typeof data !== "object" || !("tracks" in data)) return null
+  const rows = (data as { tracks?: unknown }).tracks
+  if (!Array.isArray(rows)) return null
+  return rows.map(asTrack).filter((track): track is TrackRecord => track !== null)
 }
 
 function asTrack(value: unknown): TrackRecord | null {

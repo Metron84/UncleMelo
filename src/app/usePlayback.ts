@@ -18,6 +18,7 @@ import { artworkFor, genreSquareUrl } from "../library/artwork.ts"
 import { genreCover, sortLibrary } from "../library/browse.ts"
 import { loadAllCovers, loadLastTrackId, loadMode, loadPlays, recordPlay, saveLastTrackId, saveMode, type PlayRecord } from "../library/db.ts"
 import { readPermission, resolveTrackFile } from "../library/folder.ts"
+import { phoneFile, phoneStorageAvailable } from "../library/phone.ts"
 import type { TrackRecord } from "../library/types.ts"
 
 type Session = {
@@ -295,6 +296,10 @@ export function usePlayback(
   async function resolveTrack(track: TrackRecord) {
     const local = sessionFileRef.current?.(track.path)
     if (local) return local
+    if (phoneStorageAvailable()) {
+      const stored = await phoneFile(track.path)
+      if (stored) return stored
+    }
     const folder = directoryRef.current
     if (!folder) {
       setNotice("That song couldn't be opened.")

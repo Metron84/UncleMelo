@@ -22,7 +22,8 @@ export function Welcome({ view, busy, message, progress, onChoose, onFiles, onRe
 
   useEffect(() => {
     const input = inputRef.current
-    if (!input || !("webkitdirectory" in HTMLInputElement.prototype)) return
+    const iphone = /iPhone|iPad|iPod/.test(navigator.userAgent)
+    if (!input || iphone || !("webkitdirectory" in HTMLInputElement.prototype)) return
     input.setAttribute("webkitdirectory", "")
     input.setAttribute("directory", "")
   }, [])
@@ -33,9 +34,13 @@ export function Welcome({ view, busy, message, progress, onChoose, onFiles, onRe
       {view !== "loading" && (
         <>
           <h1 className="mt-8 text-title font-medium">Your music. Your folders. No internet needed.</h1>
-          <p className="mt-4 text-body text-muted">Point UncleMelo at your UncleMelo Music folder once.</p>
+          <p className="mt-4 text-body text-muted">
+            {fileChooser
+              ? "In Files, hold UncleMelo Music and tap Compress. Then choose the zip here. The songs stay on this phone."
+              : "Point UncleMelo at your UncleMelo Music folder once."}
+          </p>
           {progress ? (
-            <ReadingProgress done={progress.done} total={progress.total} onCancel={onCancel} />
+            <ReadingProgress done={progress.done} total={progress.total} label={progress.label} onCancel={onCancel} />
           ) : fileChooser && !reconnecting ? (
             <>
               <button
@@ -50,7 +55,7 @@ export function Welcome({ view, busy, message, progress, onChoose, onFiles, onRe
                 ref={inputRef}
                 type="file"
                 multiple
-                accept="audio/*,.mp3,.m4a,.aac,.flac,.wav,.ogg"
+                accept="audio/*,.mp3,.m4a,.aac,.flac,.wav,.ogg,.zip,application/zip"
                 className="hidden"
                 onChange={(event) => {
                   const files = event.target.files
@@ -58,7 +63,7 @@ export function Welcome({ view, busy, message, progress, onChoose, onFiles, onRe
                   event.target.value = ""
                 }}
               />
-              <p className="mt-4 text-meta text-muted">On this browser, you'll need to choose your files again next time.</p>
+              <p className="mt-4 text-meta text-muted">The phone needs about 4 GB free.</p>
             </>
           ) : (
             <button
