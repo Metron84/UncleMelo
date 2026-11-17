@@ -1,0 +1,28 @@
+:root {
+  --accent: #c2703d;
+  --on-accent: #fff8ee;
+  --radius: 20px;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur: 300ms;
+  --bg: #161514;
+  --surface: #1f1d1b;
+  --text: #ede8e1;
+  --muted: #8f887e;
+  --line: #2c2926;
+}
+
+[data-theme="night"] {
+  --bg: #161514;
+  --surface: #1f1d1b;
+  --text: #ede8e1;
+  --muted: #8f887e;
+  --line: #2c2926;
+}
+
+[data-theme="day"] {
+  --bg: #f4f1ec;
+  --surface: #fbf9f6;
+  --text: #23211e;
+  --muted: #6e6a63;
+  --line: #e2dcd2;
+}
