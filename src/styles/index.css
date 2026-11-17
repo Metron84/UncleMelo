@@ -51,6 +51,14 @@
   }
 }
 
+.unclemelo-scroll {
+  scrollbar-width: none;
+}
+
+.unclemelo-scroll::-webkit-scrollbar {
+  display: none;
+}
+
 @keyframes unclemelo-eq {
   0%,
   100% {

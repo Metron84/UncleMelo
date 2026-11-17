@@ -37,6 +37,13 @@ export function useLibrary() {
   const [message, setMessage] = useState<string | null>(null)
   const [progress, setProgress] = useState<ScanProgress | null>(null)
   const [sessionOnly, setSessionOnly] = useState(false)
+  const [importReport, setImportReport] = useState<{ id: number; imported: number; skipped: string[] } | null>(null)
+  const [importToast, setImportToast] = useState<string | null>(null)
+  const importSerial = useRef(0)
+  const importToastTimer = useRef<number | null>(null)
+  useEffect(() => () => {
+    if (importToastTimer.current !== null) window.clearTimeout(importToastTimer.current)
+  }, [])
   const handleRef = useRef<FileSystemDirectoryHandle | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const filesRef = useRef(new Map<string, File>())
@@ -196,7 +203,18 @@ export function useLibrary() {
       setHandle(null)
       setTracks(rows)
       setView("ready")
-      setMessage(importSummary(saved.imported, saved.total, saved.skipped))
+      importSerial.current += 1
+      setImportReport({ id: importSerial.current, imported: saved.imported, skipped: saved.skipped })
+      setMessage(null)
+      if (saved.imported > 0) {
+        if (importToastTimer.current !== null) window.clearTimeout(importToastTimer.current)
+        const count = saved.imported
+        setImportToast(`Imported ${count} ${count === 1 ? "song" : "songs"}`)
+        importToastTimer.current = window.setTimeout(() => {
+          setImportToast(null)
+          importToastTimer.current = null
+        }, 4000)
+      }
     } catch (error) {
       if (abortRef.current !== controller) return
       if (error instanceof ScanCancelled) {
@@ -361,6 +379,8 @@ async function tracksFromPhone(
     message,
     progress,
     sessionOnly,
+    importReport,
+    importToast,
     handle,
     choose,
     chooseFiles,

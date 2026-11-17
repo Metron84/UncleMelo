@@ -24,6 +24,8 @@ type NowPlayingProps = {
   onOpenLibrary: () => void
   showLibrary?: boolean
   onShare?: () => void
+  onClose?: () => void
+  skipped?: string[]
 }
 
 function formatTime(seconds: number) {
@@ -52,15 +54,26 @@ export function NowPlaying({
   onOpenLibrary,
   showLibrary = true,
   onShare,
+  onClose,
+  skipped = [],
 }: NowPlayingProps) {
   const colour = genreCover(track?.genre ?? "")
   const remaining = Math.max(0, duration - elapsed)
   const progress = duration === 0 ? 0 : Math.min(100, (elapsed / duration) * 100)
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-[480px] flex-col bg-bg px-6 text-text">
+    <main
+      className={`mx-auto flex w-full flex-col bg-bg px-6 text-text ${onClose ? "h-dvh max-w-none" : "min-h-dvh max-w-[480px]"}`}
+      style={onClose ? { paddingTop: "env(safe-area-inset-top, 0px)" } : undefined}
+    >
       <header className="flex h-11 items-center justify-between">
-        <p className="text-body font-medium">UncleMelo</p>
+        {onClose ? (
+          <button type="button" className="grid h-11 w-11 place-items-center" aria-label="Close" onClick={onClose}>
+            <ChevronDown />
+          </button>
+        ) : (
+          <p className="text-body font-medium">UncleMelo</p>
+        )}
         <div className="flex items-center">
           <button
             type="button"
@@ -72,15 +85,17 @@ export function NowPlaying({
               {mode}
             </span>
           </button>
-          <SettingsMenu />
-          <button
-            type="button"
-            className="grid h-11 w-11 place-items-center"
-            aria-label={theme === "night" ? "Use daylight theme" : "Use late night theme"}
-            onClick={onToggleTheme}
-          >
-            {theme === "night" ? <SunIcon /> : <MoonIcon />}
-          </button>
+          {!onClose && <SettingsMenu skipped={skipped} />}
+          {!onClose && (
+            <button
+              type="button"
+              className="grid h-11 w-11 place-items-center"
+              aria-label={theme === "night" ? "Use daylight theme" : "Use late night theme"}
+              onClick={onToggleTheme}
+            >
+              {theme === "night" ? <SunIcon /> : <MoonIcon />}
+            </button>
+          )}
         </div>
       </header>
 
@@ -184,6 +199,14 @@ function Glyph({ children, size = 22 }: { children: ReactNode; size?: number }) 
     >
       {children}
     </svg>
+  )
+}
+
+function ChevronDown() {
+  return (
+    <Glyph>
+      <path d="M6.5 9.5 12 15l5.5-5.5" />
+    </Glyph>
   )
 }
 
