@@ -49,13 +49,12 @@ export function Welcome({ view, busy, message, progress, onChoose, onFiles, onRe
                 onClick={() => inputRef.current?.click()}
                 disabled={busy}
               >
-                Choose music files
+                Choose the zip
               </button>
               <input
                 ref={inputRef}
                 type="file"
                 multiple
-                accept="audio/*,.mp3,.m4a,.aac,.flac,.wav,.ogg,.zip,application/zip"
                 className="hidden"
                 onChange={(event) => {
                   const files = event.target.files
