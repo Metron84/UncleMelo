@@ -17,6 +17,7 @@ export const genres = [
   { name: "Electronic & Dance", cover: "#2F5A66" },
   { name: "Country & Bluegrass", cover: "#7A5A3A" },
   { name: "Soundtrack & Score", cover: "#4A4F57" },
+  { name: "Unsorted", cover: "#5A5650" },
 ] as const
 
 const collectionOrder = ["MrMelo Mix", "The Music of Melo"] as const
@@ -219,8 +220,9 @@ function decadeOrder(names: string[]) {
 }
 
 function decadeValue(name: string) {
+  if (name === "Unknown decade") return Number.NEGATIVE_INFINITY
   const value = Number.parseInt(name, 10)
-  return Number.isFinite(value) ? value : 0
+  return Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY
 }
 
 function artistOrder(names: string[]) {

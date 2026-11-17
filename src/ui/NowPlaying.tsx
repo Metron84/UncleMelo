@@ -3,6 +3,7 @@ import type { ThemeName } from "../app/theme.ts"
 import type { ListeningMode } from "../brain/pick.ts"
 import { genreCover } from "../library/browse.ts"
 import type { TrackRecord } from "../library/types.ts"
+import { SettingsMenu } from "./SettingsMenu.tsx"
 
 type NowPlayingProps = {
   theme: ThemeName
@@ -22,6 +23,7 @@ type NowPlayingProps = {
   onNext: () => void
   onOpenLibrary: () => void
   showLibrary?: boolean
+  onShare?: () => void
 }
 
 function formatTime(seconds: number) {
@@ -49,6 +51,7 @@ export function NowPlaying({
   onNext,
   onOpenLibrary,
   showLibrary = true,
+  onShare,
 }: NowPlayingProps) {
   const colour = genreCover(track?.genre ?? "")
   const remaining = Math.max(0, duration - elapsed)
@@ -69,6 +72,7 @@ export function NowPlaying({
               {mode}
             </span>
           </button>
+          <SettingsMenu />
           <button
             type="button"
             className="grid h-11 w-11 place-items-center"
@@ -133,10 +137,17 @@ export function NowPlaying({
       </div>
 
       <div className="mt-auto flex flex-col items-center pt-8 text-center">
-        <p className="text-meta text-muted">
-          Uncle's pick
-          <span className="mt-1 block">up next</span>
-        </p>
+        <div className="flex items-center gap-1">
+          <p className="text-meta text-muted">
+            Uncle's pick
+            <span className="mt-1 block">up next</span>
+          </p>
+          {onShare && (
+            <button type="button" className="grid h-11 w-11 place-items-center" aria-label="Share" onClick={onShare}>
+              <ShareIcon />
+            </button>
+          )}
+        </div>
         {next && (
           <>
             <p className="mt-3 text-body">{next.title}</p>
@@ -189,6 +200,16 @@ function MoonIcon() {
   return (
     <Glyph>
       <path d="M16.2 14.8A6.2 6.2 0 0 1 9.2 7.8 6.4 6.4 0 1 0 16.2 14.8z" />
+    </Glyph>
+  )
+}
+
+function ShareIcon() {
+  return (
+    <Glyph size={20}>
+      <path d="M12 4v9" />
+      <path d="M8.5 7 12 3.75 15.5 7" />
+      <path d="M6 11.5V19h12v-7.5" />
     </Glyph>
   )
 }

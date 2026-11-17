@@ -34,6 +34,7 @@ export function usePlayback(
   directory: FileSystemDirectoryHandle | null,
   tracks: TrackRecord[],
   onPermissionLost: () => void,
+  sessionFile?: (path: string) => File | null,
 ) {
   const [queue, setQueue] = useState<TrackRecord[]>([])
   const [index, setIndex] = useState(0)
@@ -67,6 +68,7 @@ export function usePlayback(
   const coversRef = useRef(new Map<string, CoverArt>())
   const booted = useRef(false)
   const lostAccess = useRef(onPermissionLost)
+  const sessionFileRef = useRef(sessionFile)
   const bridge = useRef({
     handoff: (_info: Handoff) => {},
     ended: (_position: number, _duration: number) => {},
@@ -100,6 +102,7 @@ export function usePlayback(
     aheadRef.current = ahead
     scopeRef.current = scope
     lostAccess.current = onPermissionLost
+    sessionFileRef.current = sessionFile
     bridge.current.next = () => void skip(1)
     bridge.current.previous = () => void skip(-1)
     bridge.current.play = () => void toggle()
@@ -290,8 +293,13 @@ export function usePlayback(
   }
 
   async function resolveTrack(track: TrackRecord) {
+    const local = sessionFileRef.current?.(track.path)
+    if (local) return local
     const folder = directoryRef.current
-    if (!folder) return null
+    if (!folder) {
+      setNotice("That song couldn't be opened.")
+      return null
+    }
     try {
       return await resolveTrackFile(folder, track.path)
     } catch {
@@ -462,5 +470,7 @@ export function usePlayback(
     history,
     cycleMode,
     letUncleChoose,
+    endless,
+    scope,
   }
 }

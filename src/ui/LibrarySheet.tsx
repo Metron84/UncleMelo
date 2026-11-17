@@ -16,7 +16,9 @@ import {
   type HomeList,
   type LibraryGroup,
 } from "../library/browse.ts"
+import type { ScanProgress } from "../library/builder.ts"
 import type { TrackRecord } from "../library/types.ts"
+import { ReadingProgress } from "./ReadingProgress.tsx"
 
 const homePills: readonly HomeList[] = ["Recently played", "Most played", "Rediscover"]
 const alphabet = [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ", "#"]
@@ -43,9 +45,13 @@ export type LibraryPanelProps = {
   onPlayNext: (track: TrackRecord) => void
   onAddToQueue: (track: TrackRecord) => void
   onShuffleGroup: (list: TrackRecord[]) => void
+  onShare: (title: string, tracks: TrackRecord[]) => void
   onRescan: () => void
+  onCancelScan: () => void
   onLetUncleChoose: () => void
   onClose: () => void
+  progress: ScanProgress | null
+  sessionOnly: boolean
 }
 
 export function LibraryPanel(props: LibraryPanelProps) {
@@ -107,11 +113,19 @@ export function LibraryPanel(props: LibraryPanelProps) {
               Library
             </h2>
             <p className="text-meta text-muted">{songs(props.tracks.length)} · offline</p>
+            {props.sessionOnly && (
+              <p className="text-meta text-muted">On this browser, you'll need to choose your files again next time.</p>
+            )}
           </div>
           <button type="button" className="mt-1 h-11 shrink-0 px-1 text-meta text-muted disabled:opacity-60" onClick={props.onRescan} disabled={props.busy}>
             {props.busy ? "Reading" : "Rescan"}
           </button>
         </div>
+        {props.progress && (
+          <div className="px-6">
+            <ReadingProgress done={props.progress.done} total={props.progress.total} onCancel={props.onCancelScan} />
+          </div>
+        )}
         <button type="button" className="mx-6 mt-1 h-11 text-left text-body text-accent" onClick={props.onLetUncleChoose}>
           Let Uncle choose
         </button>
@@ -165,6 +179,7 @@ export function LibraryPanel(props: LibraryPanelProps) {
             }}
             onPlay={() => props.onPlay(filteredGroup, 0)}
             onShuffle={() => props.onShuffleGroup(filteredGroup)}
+            onShare={() => props.onShare(page.title, filteredGroup)}
           />
         )}
         {!searching && page?.filterKind === "decade" && (
@@ -214,6 +229,7 @@ export function LibraryPanel(props: LibraryPanelProps) {
                   }}
                   onPlay={() => props.onPlay(decadeShown, 0)}
                   onShuffle={() => props.onShuffleGroup(decadeShown)}
+                  onShare={() => props.onShare(decadeGenre ? `${decade} · ${decadeGenre}` : decade, decadeShown)}
                 />
                 <ChipRow layout={props.layout} label="Genres">
                   {genresPresent(decadeTracks).map((name) => (
@@ -387,12 +403,14 @@ function GroupBar({
   onBack,
   onPlay,
   onShuffle,
+  onShare,
 }: {
   title: string
   count: number
   onBack: () => void
   onPlay: () => void
   onShuffle: () => void
+  onShare: () => void
 }) {
   return (
     <div className="px-6 pb-2">
@@ -400,10 +418,13 @@ function GroupBar({
         <button type="button" className="grid h-11 w-11 place-items-center" aria-label="Back" onClick={onBack}>
           <Chevron />
         </button>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="truncate text-body font-medium">{title}</p>
           <p className="text-meta text-muted">{songs(count)}</p>
         </div>
+        <button type="button" className="grid h-11 w-11 shrink-0 place-items-center" aria-label="Share" onClick={onShare}>
+          <ShareIcon />
+        </button>
       </div>
       <div className="mt-2 flex gap-2">
         <button type="button" className="h-12 flex-1 rounded-full bg-accent text-body font-medium text-on-accent" onClick={onPlay}>
@@ -819,6 +840,16 @@ function PauseMark() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
       <path d="M9 6.5v11M15 6.5v11" />
+    </svg>
+  )
+}
+
+function ShareIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 4v9" />
+      <path d="M8.5 7 12 3.75 15.5 7" />
+      <path d="M6 11.5V19h12v-7.5" />
     </svg>
   )
 }

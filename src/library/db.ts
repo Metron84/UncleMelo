@@ -1,4 +1,5 @@
 import Dexie, { type Table } from "dexie"
+import type { ScannedFile } from "./builder.ts"
 import type { TrackRecord } from "./types.ts"
 
 type SettingRecord = {
@@ -37,6 +38,7 @@ class UncleMeloDB extends Dexie {
   settings!: Table<SettingRecord, string>
   covers!: Table<CoverRecord, string>
   plays!: Table<PlayRecord, number>
+  scanned!: Table<ScannedFile, string>
 
   constructor() {
     super("unclemelo")
@@ -44,6 +46,11 @@ class UncleMeloDB extends Dexie {
     this.version(2).stores({
       ...stores,
       plays: "++id, trackId, startedAt, mode",
+    })
+    this.version(3).stores({
+      ...stores,
+      plays: "++id, trackId, startedAt, mode",
+      scanned: "path",
     })
   }
 }
@@ -89,6 +96,27 @@ export async function replaceTracks(tracks: TrackRecord[]) {
   await db.transaction("rw", db.tracks, async () => {
     await db.tracks.clear()
     await db.tracks.bulkPut(tracks)
+  })
+}
+
+export async function loadScanned() {
+  return db.scanned.toArray()
+}
+
+export async function saveJsonLibrary(tracks: TrackRecord[]) {
+  await db.transaction("rw", db.tracks, db.scanned, async () => {
+    await db.scanned.clear()
+    await db.tracks.clear()
+    await db.tracks.bulkPut(tracks)
+  })
+}
+
+export async function saveBuiltLibrary(tracks: TrackRecord[], scanned: ScannedFile[]) {
+  await db.transaction("rw", db.tracks, db.scanned, async () => {
+    await db.tracks.clear()
+    await db.scanned.clear()
+    await db.tracks.bulkPut(tracks)
+    await db.scanned.bulkPut(scanned)
   })
 }
 

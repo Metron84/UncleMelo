@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react"
-import { NowPlaying } from "../ui/NowPlaying.tsx"
+import type { TrackRecord } from "../library/types.ts"
+import { mixUrl, readShareName, shareLink } from "../share/mix.ts"
 import { LibraryPanel, LibrarySheet } from "../ui/LibrarySheet.tsx"
+import { MixPage } from "../ui/MixPage.tsx"
+import { NowPlaying } from "../ui/NowPlaying.tsx"
 import { Welcome } from "../ui/Welcome.tsx"
 import { applyTheme, readTheme, saveTheme, type ThemeName } from "./theme.ts"
 import { useLibrary } from "./useLibrary.ts"
@@ -19,6 +22,12 @@ function useWideScreen() {
 }
 
 export default function App() {
+  const path = window.location.pathname.replace(/\/$/, "") || "/"
+  if (path === "/mix") return <MixPage />
+  return <Player />
+}
+
+function Player() {
   const [theme, setTheme] = useState<ThemeName>(() => {
     const initial = readTheme()
     applyTheme(initial)
@@ -26,9 +35,10 @@ export default function App() {
   })
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [focusToken, setFocusToken] = useState(0)
+  const [toast, setToast] = useState(false)
   const wide = useWideScreen()
   const library = useLibrary()
-  const playback = usePlayback(library.handle, library.tracks, library.loseAccess)
+  const playback = usePlayback(library.handle, library.tracks, library.loseAccess, library.fileFor)
 
   function toggleTheme() {
     const next = theme === "night" ? "day" : "night"
@@ -39,6 +49,18 @@ export default function App() {
   function focusSearch() {
     setLibraryOpen(true)
     setFocusToken((value) => value + 1)
+  }
+
+  async function shareMix(title: string, tracks: TrackRecord[]) {
+    if (tracks.length === 0) return
+    try {
+      const result = await shareLink(title, mixUrl(title, tracks, readShareName()))
+      if (result !== "copied") return
+      setToast(true)
+      window.setTimeout(() => setToast(false), 2200)
+    } catch {
+      setToast(false)
+    }
   }
 
   useEffect(() => {
@@ -70,11 +92,16 @@ export default function App() {
         view={library.view}
         busy={library.busy}
         message={library.message}
-        onChoose={library.choose}
-        onReconnect={library.reconnect}
+        progress={library.progress}
+        onChoose={() => void library.choose()}
+        onFiles={(list) => void library.chooseFiles(list)}
+        onReconnect={() => void library.reconnect()}
+        onCancel={library.cancelScan}
       />
     )
   }
+
+  const uncleSongs = playback.endless ? (playback.scope && playback.scope.length > 0 ? playback.scope : uniqueSongs(playback.track, playback.next)) : []
 
   const panel = {
     tracks: library.tracks,
@@ -84,12 +111,16 @@ export default function App() {
     playing: playback.playing,
     busy: library.busy,
     message: library.message,
+    progress: library.progress,
+    sessionOnly: library.sessionOnly,
     focusToken,
     onPlay: playback.playList,
     onPlayNext: playback.playNext,
     onAddToQueue: playback.addToQueue,
     onShuffleGroup: playback.shuffleGroup,
+    onShare: (title: string, tracks: TrackRecord[]) => void shareMix(title, tracks),
     onRescan: () => void library.rescan(),
+    onCancelScan: library.cancelScan,
     onLetUncleChoose: () => {
       playback.letUncleChoose()
       if (!wide) setLibraryOpen(false)
@@ -123,6 +154,7 @@ export default function App() {
           onNext={playback.nextTrack}
           onOpenLibrary={() => setLibraryOpen(true)}
           showLibrary={!wide}
+          onShare={uncleSongs.length > 0 ? () => void shareMix("Uncle's Pick", uncleSongs) : undefined}
         />
       </div>
       {!wide && libraryOpen && (
@@ -134,6 +166,21 @@ export default function App() {
           onToggle={playback.toggle}
         />
       )}
+      {toast && (
+        <p className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-surface px-4 py-2 text-meta text-text" role="status">
+          Link copied
+        </p>
+      )}
     </div>
   )
+}
+
+function uniqueSongs(current: TrackRecord | null, next: TrackRecord | null) {
+  const songs = [current, next].filter((track): track is TrackRecord => track !== null)
+  const seen = new Set<string>()
+  return songs.filter((track) => {
+    if (seen.has(track.id)) return false
+    seen.add(track.id)
+    return true
+  })
 }

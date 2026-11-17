@@ -39,9 +39,10 @@ export async function requestReadPermission(handle: FileSystemDirectoryHandle) {
 }
 
 export async function readLibraryJson(root: FileSystemDirectoryHandle) {
+  const handle = await findLibraryFile(root)
+  if (!handle) return null
   try {
-    const file = await resolveTrackFile(root, "library.json")
-    const data: unknown = JSON.parse(await file.text())
+    const data: unknown = JSON.parse(await (await handle.getFile()).text())
     if (!data || typeof data !== "object" || !("tracks" in data) || !Array.isArray(data.tracks)) {
       throw new FolderAccessError()
     }
@@ -50,6 +51,15 @@ export async function readLibraryJson(root: FileSystemDirectoryHandle) {
     if (error instanceof FolderAccessError) throw error
     throw new FolderAccessError()
   }
+}
+
+async function findLibraryFile(root: FileSystemDirectoryHandle) {
+  const direct = await tryFile(root, "library.json")
+  if (direct) return direct
+  for await (const [name, handle] of root.entries()) {
+    if (handle.kind === "file" && sameName(name, "library.json")) return handle
+  }
+  return null
 }
 
 export async function resolveTrackFile(root: FileSystemDirectoryHandle, path: string) {
