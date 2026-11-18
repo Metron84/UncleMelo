@@ -58,11 +58,11 @@ export function searchTracks(tracks: readonly TrackRecord[], query: string) {
   )
 }
 
-export function buildGroups(tracks: readonly TrackRecord[], mode: BrowseMode): LibraryGroup[] {
+export function buildGroups(tracks: readonly TrackRecord[], mode: BrowseMode, lovedIds?: ReadonlySet<string>): LibraryGroup[] {
   if (mode === "Genre") return genreGroups(tracks)
   if (mode === "Decade") return namedGroups(tracks, (track) => track.decade, decadeOrder)
   if (mode === "Artist") return artistGroups(tracks)
-  return collectionGroups(tracks)
+  return collectionGroups(tracks, lovedIds)
 }
 
 function genreGroups(tracks: readonly TrackRecord[]) {
@@ -89,22 +89,24 @@ function namedGroups(
   )
 }
 
-function collectionGroups(tracks: readonly TrackRecord[]) {
+function collectionGroups(tracks: readonly TrackRecord[], lovedIds?: ReadonlySet<string>) {
   const names = new Set<string>()
   for (const track of tracks) {
     for (const name of track.collections) names.add(name)
   }
   const known = collectionOrder.filter((name) => names.has(name))
   const extra = [...names]
-    .filter((name) => !collectionOrder.includes(name as (typeof collectionOrder)[number]))
+    .filter((name) => name !== "Loved" && !collectionOrder.includes(name as (typeof collectionOrder)[number]))
     .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
-  return [...known, ...extra].map((name) =>
+  const groups = [...known, ...extra].map((name) =>
     groupFrom(
       name,
       tracks.filter((track) => track.collections.includes(name)),
       null,
     ),
   )
+  if (!lovedIds) return groups
+  return [groupFrom("Loved", tracks.filter((track) => lovedIds.has(track.id)), "#7A3E3A"), ...groups]
 }
 
 function groupFrom(name: string, tracks: TrackRecord[], cover: string | null): LibraryGroup {

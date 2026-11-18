@@ -50,6 +50,11 @@ const decks: Deck[] = [makeDeck(), makeDeck()]
 
 let context: AudioContext | null = null
 let master: GainNode | null = null
+let masterLevel = 1
+let outputMuted = false
+let silenceToken = 0
+let crossfadeSeconds = CROSSFADE_SECONDS
+let naturalEnabled = true
 let live = 0
 let fading = false
 let fadeToken = 0
@@ -96,12 +101,16 @@ export async function playFile(file: File) {
     return
   }
   if (current.audio.paused) await current.audio.play()
-  const remaining = current.audio.duration - current.audio.currentTime
-  const seconds = Math.min(MANUAL_FADE_SECONDS, Number.isFinite(remaining) && remaining > 0 ? remaining : MANUAL_FADE_SECONDS)
   fadeToken += 1
   prepToken += 1
   preloadTask = null
   naturalArmed = true
+  if (crossfadeSeconds <= 0) {
+    await cutTo(live, file)
+    return
+  }
+  const remaining = current.audio.duration - current.audio.currentTime
+  const seconds = Math.min(MANUAL_FADE_SECONDS, Number.isFinite(remaining) && remaining > 0 ? remaining : MANUAL_FADE_SECONDS)
   await fadeFrom(live, file, Math.max(0.05, seconds), "manual")
 }
 
@@ -135,6 +144,7 @@ export function restartTrack() {
 }
 
 export function seekTo(seconds: number) {
+  if (fading) cancelCrossfade()
   const audio = decks[live].audio
   const duration = Number.isFinite(audio.duration) ? audio.duration : seconds
   audio.currentTime = Math.min(Math.max(0, seconds), duration)
@@ -143,6 +153,39 @@ export function seekTo(seconds: number) {
 
 export function seekBy(seconds: number) {
   seekTo(playbackTime() + seconds)
+}
+
+export function setCrossfadeSeconds(seconds: number) {
+  crossfadeSeconds = seconds
+}
+
+export function setNaturalHandoff(enabled: boolean) {
+  naturalEnabled = enabled
+  if (!enabled) naturalArmed = false
+}
+
+export async function setOutputMuted(muted: boolean) {
+  await ensureAudio()
+  outputMuted = muted
+  rampMaster(muted ? 0 : masterLevel, 0.15)
+}
+
+export function fadeOutForSleep(seconds: number, done: () => void) {
+  void ensureAudio().then(() => {
+    const token = ++silenceToken
+    rampMaster(0, seconds)
+    window.setTimeout(() => {
+      if (token !== silenceToken) return
+      pausePlayback()
+      rampMaster(outputMuted ? 0 : masterLevel, 0)
+      done()
+    }, seconds * 1000)
+  })
+}
+
+export function cancelSleepFade() {
+  silenceToken += 1
+  if (context && master) rampMaster(outputMuted ? 0 : masterLevel, 0.15)
 }
 
 export function setUpcomingProvider(provider: () => Promise<File | null>) {
@@ -238,7 +281,7 @@ function watchDeck(index: number, deck: Deck) {
     if (!Number.isFinite(duration) || duration <= 0) return
     emitTime(audio.currentTime, duration)
     publishPosition(false)
-    if (fading || naturalArmed) return
+    if (fading || naturalArmed || !naturalEnabled || crossfadeSeconds <= 0) return
     const remaining = duration - audio.currentTime
     if (!preloadTask && remaining <= PRELOAD_LEAD_SECONDS) preloadTask = preload()
     const fade = autoFadeSeconds(duration)
@@ -355,8 +398,56 @@ function curve(samples: number, edge: "in" | "out") {
 }
 
 function autoFadeSeconds(duration: number) {
-  if (duration < 3 * CROSSFADE_SECONDS) return Math.min(SHORT_FADE_SECONDS, duration)
-  return Math.min(CROSSFADE_SECONDS, duration)
+  if (crossfadeSeconds <= 0) return Number.POSITIVE_INFINITY
+  if (duration < 3 * crossfadeSeconds) return Math.min(SHORT_FADE_SECONDS, duration)
+  return Math.min(crossfadeSeconds, duration)
+}
+
+async function cutTo(from: number, file: File) {
+  await ensureAudio()
+  const outgoing = decks[from]
+  const incoming = decks[1 - from]
+  if (!sameFile(incoming, file)) assign(incoming, file)
+  incoming.audio.currentTime = 0
+  setGain(outgoing, 0)
+  setGain(incoming, 1)
+  const position = outgoing.audio.currentTime || 0
+  const duration = Number.isFinite(outgoing.audio.duration) ? outgoing.audio.duration : 0
+  await incoming.audio.play()
+  live = 1 - from
+  fading = false
+  resetPrepare()
+  emit({ how: "manual", position, duration, fresh: false })
+  emitTime(incoming.audio.currentTime, incoming.audio.duration || 0)
+  publishPosition(true)
+  release(outgoing)
+  setGain(decks[live], 1)
+}
+
+function cancelCrossfade() {
+  fadeToken += 1
+  fading = false
+  naturalArmed = false
+  const outgoing = decks[1 - live]
+  setGain(decks[live], 1)
+  setGain(outgoing, 0)
+  if (outgoing.url) release(outgoing)
+  prepToken += 1
+  preloadTask = null
+}
+
+function rampMaster(to: number, seconds: number) {
+  if (!context || !master) return
+  const now = context.currentTime
+  const param = master.gain
+  const from = Number.isFinite(param.value) ? param.value : masterLevel
+  param.cancelScheduledValues(now)
+  param.setValueAtTime(from, now)
+  if (seconds <= 0) {
+    param.setValueAtTime(to, now)
+    return
+  }
+  param.linearRampToValueAtTime(Math.max(0, to), now + seconds)
 }
 
 function assign(deck: Deck, file: File) {

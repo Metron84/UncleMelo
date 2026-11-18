@@ -120,4 +120,14 @@ describe("pickNext", () => {
     expect(choice?.track.id).toBe("loved")
     expect(choice?.reason).toBe("One you always finish")
   })
+
+  it("adds weight to a loved song and skips songs hidden from Uncle", () => {
+    const current = track({ id: "now", artist: "Nils Frahm", genre: "Soundtrack & Score" })
+    const plain = track({ id: "a", artist: "Joan Baez", genre: "Folk" })
+    const loved = track({ id: "b", artist: "Sandy Denny", genre: "Folk" })
+    const library = [current, plain, loved]
+    expect(pickNext(current, library, [], "Late Night", now, () => 0)?.track.id).toBe("a")
+    expect(pickNext(current, library, [], "Late Night", now, () => 0, { loved: new Set(["b"]) })?.track.id).toBe("b")
+    expect(pickNext(current, library, [], "Late Night", now, () => 0, { hidden: new Set(["a"]) })?.track.id).toBe("b")
+  })
 })

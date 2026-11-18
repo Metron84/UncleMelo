@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from "react"
+import { crossfadeOptions } from "../app/playback-order.ts"
 import { readShareName, saveShareName } from "../share/mix.ts"
 import { ReflectiveMark } from "./ReflectiveMark.tsx"
+
+export type HiddenTrack = {
+  id: string
+  title: string
+  artist: string
+}
 
 type SettingsMenuProps = {
   busy?: boolean
@@ -8,11 +15,26 @@ type SettingsMenuProps = {
   onImport?: (list: FileList) => void
   skipped?: string[]
   sessionOnly?: boolean
+  crossfade?: number
+  onCrossfade?: (seconds: number) => void
+  hiddenTracks?: HiddenTrack[]
+  onRestoreHidden?: (id: string) => void
 }
 
-export function SettingsMenu({ busy = false, onRescan, onImport, skipped = [], sessionOnly = false }: SettingsMenuProps) {
+export function SettingsMenu({
+  busy = false,
+  onRescan,
+  onImport,
+  skipped = [],
+  sessionOnly = false,
+  crossfade = 6,
+  onCrossfade,
+  hiddenTracks = [],
+  onRestoreHidden,
+}: SettingsMenuProps) {
   const [open, setOpen] = useState(false)
   const [showSkipped, setShowSkipped] = useState(false)
+  const [showHidden, setShowHidden] = useState(false)
   const [name, setName] = useState(() => readShareName())
   const root = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -32,7 +54,7 @@ export function SettingsMenu({ busy = false, onRescan, onImport, skipped = [], s
         <GearIcon />
       </button>
       {open && (
-        <div className="absolute right-0 top-11 z-20 w-64 rounded-card border border-line bg-surface p-4 text-left">
+        <div className="absolute right-0 top-11 z-20 max-h-[70vh] w-72 overflow-y-auto rounded-card border border-line bg-surface p-4 text-left">
           {onRescan && (
             <button type="button" className="mb-3 block h-11 text-body disabled:opacity-60" onClick={onRescan} disabled={busy}>
               {busy ? "Reading" : "Rescan"}
@@ -56,6 +78,46 @@ export function SettingsMenu({ busy = false, onRescan, onImport, skipped = [], s
                 }}
               />
             </>
+          )}
+          {onCrossfade && (
+            <div className="mb-3">
+              <p className="text-meta text-muted">Crossfade</p>
+              <div className="mt-2 grid grid-cols-4 gap-1">
+                {crossfadeOptions.map((option) => (
+                  <button
+                    key={option.label}
+                    type="button"
+                    className={`h-11 rounded-full text-meta ${crossfade === option.seconds ? "bg-accent text-on-accent" : "border border-line text-muted"}`}
+                    aria-pressed={crossfade === option.seconds}
+                    onClick={() => onCrossfade(option.seconds)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {onRestoreHidden && hiddenTracks.length > 0 && (
+            <div className="mb-3">
+              <button type="button" className="h-11 text-left text-meta text-muted" onClick={() => setShowHidden((value) => !value)}>
+                Hidden from Uncle's Pick ({hiddenTracks.length})
+              </button>
+              {showHidden && (
+                <ul className="max-h-40 overflow-y-auto">
+                  {hiddenTracks.map((track) => (
+                    <li key={track.id} className="flex items-center justify-between gap-2">
+                      <span className="min-w-0">
+                        <span className="block truncate text-meta text-text">{track.title}</span>
+                        <span className="block truncate text-meta text-muted">{track.artist}</span>
+                      </span>
+                      <button type="button" className="h-11 shrink-0 px-2 text-meta" onClick={() => onRestoreHidden(track.id)}>
+                        Restore
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
           {sessionOnly && <p className="mb-3 text-meta text-muted">On this browser, you'll need to choose your files again next time.</p>}
           {skipped.length > 0 && (

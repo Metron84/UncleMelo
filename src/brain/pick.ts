@@ -57,6 +57,11 @@ export function primaryArtist(artist: string) {
   return head.trim().toLocaleLowerCase()
 }
 
+export type PickBias = {
+  loved?: ReadonlySet<string>
+  hidden?: ReadonlySet<string>
+}
+
 export function pickNext(
   current: TrackRecord | null,
   library: readonly TrackRecord[],
@@ -64,12 +69,15 @@ export function pickNext(
   mode: ListeningMode,
   now: number,
   random: () => number = Math.random,
+  bias: PickBias = {},
 ): Pick | null {
-  const pool = candidates(library, history, current, now)
+  const hidden = bias.hidden
+  const source = hidden && hidden.size > 0 ? library.filter((track) => !hidden.has(track.id)) : library
+  const pool = candidates(source, history, current, now)
   if (pool.length === 0) return null
   const byId = new Map(library.map((track) => [track.id, track]))
   const ranked = pool
-    .map((track) => scoreTrack(track, current, history, byId, mode, now))
+    .map((track) => scoreTrack(track, current, history, byId, mode, now, bias.loved))
     .sort((a, b) => b.score - a.score || a.track.id.localeCompare(b.track.id))
   const top = ranked.slice(0, 25)
   const chosen = weighted(top, random)
@@ -117,6 +125,7 @@ function scoreTrack(
   byId: Map<string, TrackRecord>,
   mode: ListeningMode,
   now: number,
+  loved?: ReadonlySet<string>,
 ) {
   const trackPlays = history.filter((play) => play.trackId === track.id)
   const artistPlays = history.filter((play) => {
@@ -135,6 +144,7 @@ function scoreTrack(
   const lastPlay = trackPlays.reduce((latest, play) => Math.max(latest, play.startedAt), 0)
   const rediscovery = trackPlays.length > 0 && completion >= 0.7 && now - lastPlay >= 30 * DAY
   const timeFit = clustersNear(trackPlays, new Date(now).getHours())
+  const love = loved?.has(track.id) ? 2 : 0
 
   const factors = [
     { value: rediscovery ? 1.5 : 0, reason: "You haven't played this in a while" },
@@ -148,6 +158,7 @@ function scoreTrack(
     { value: timeFit ? 0.5 : 0, reason: "You often play this around now" },
     { value: decade ? 0.5 : 0, reason: "From a nearby decade" },
     { value: artistPlays.length > 0 && artistCompletion >= 0.7 ? artistCompletion : 0, reason: "An artist you stay with" },
+    { value: love, reason: "A song you love" },
   ]
   const score =
     2 * completion +
@@ -158,7 +169,8 @@ function scoreTrack(
     (decade ? 0.5 : 0) +
     modeScore +
     (rediscovery ? 1.5 : 0) +
-    (timeFit ? 0.5 : 0)
+    (timeFit ? 0.5 : 0) +
+    love
   const reason = factors.reduce((best, factor) => (factor.value > best.value ? factor : best), factors[0]).reason
   return { track, score, reason }
 }

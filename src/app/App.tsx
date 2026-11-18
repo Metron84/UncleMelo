@@ -36,6 +36,7 @@ function Player() {
   const [nowPlaying, setNowPlaying] = useState(false)
   const [focusToken, setFocusToken] = useState(0)
   const [toast, setToast] = useState(false)
+  const [queueOpen, setQueueOpen] = useState(false)
   const wide = useWideScreen()
   const library = useLibrary()
   const playback = usePlayback(library.handle, library.tracks, library.loseAccess, library.fileFor)
@@ -72,6 +73,18 @@ function Player() {
         return
       }
       if (typing || event.repeat) return
+      if (wide && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        const key = event.key.toLowerCase()
+        if (key === "s" || key === "r" || key === "m" || key === "l" || key === "q") {
+          event.preventDefault()
+          if (key === "s") playback.toggleShuffle()
+          else if (key === "r") playback.cycleRepeat()
+          else if (key === "m") playback.toggleMute()
+          else if (key === "l") playback.toggleLove()
+          else setQueueOpen((open) => !open)
+          return
+        }
+      }
       if (event.key === " ") {
         event.preventDefault()
         playback.toggle()
@@ -83,7 +96,7 @@ function Player() {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [playback])
+  }, [playback, wide])
 
   if (library.view !== "ready") {
     return (
@@ -129,6 +142,12 @@ function Player() {
     onToggleTheme: toggleTheme,
     onImport: (list: FileList) => void library.chooseFiles(list),
     skipped: library.importReport?.skipped ?? [],
+    lovedIds: playback.lovedIds,
+    onNotForMe: playback.hideFromUncle,
+    crossfade: playback.crossfade,
+    onCrossfade: playback.chooseCrossfade,
+    hiddenTracks: playback.hiddenTracks,
+    onRestoreHidden: playback.restoreHidden,
   }
 
   const player = (
@@ -153,6 +172,32 @@ function Player() {
       onShare={uncleSongs.length > 0 ? () => void shareMix("Uncle's Pick", uncleSongs) : undefined}
       onClose={wide ? undefined : () => setNowPlaying(false)}
       skipped={library.importReport?.skipped ?? []}
+      shuffle={playback.shuffle}
+      shuffleDisabled={playback.endless}
+      onShuffle={playback.toggleShuffle}
+      repeat={playback.repeat}
+      onRepeat={playback.cycleRepeat}
+      muted={playback.muted}
+      onMute={playback.toggleMute}
+      loved={playback.loved}
+      onLove={playback.toggleLove}
+      sleepOn={playback.sleepOn}
+      sleepMark={playback.sleepMark}
+      onSleep={playback.chooseSleep}
+      coming={playback.coming}
+      onReorder={playback.reorderComing}
+      onClearQueue={playback.clearComing}
+      handsToUncle={playback.handsToUncle}
+      queueOpen={queueOpen}
+      onQueue={setQueueOpen}
+      onSeek={playback.seek}
+      onNotForMe={() => {
+        if (playback.track) playback.hideFromUncle(playback.track)
+      }}
+      crossfade={playback.crossfade}
+      onCrossfade={playback.chooseCrossfade}
+      hiddenTracks={playback.hiddenTracks}
+      onRestoreHidden={playback.restoreHidden}
     />
   )
 
@@ -168,6 +213,8 @@ function Player() {
           duration={playback.duration}
           onToggle={playback.toggle}
           onOpen={() => setNowPlaying(true)}
+          loved={playback.loved}
+          onLove={playback.toggleLove}
         />
         <SlidingPlayer open={nowPlaying} onClose={() => setNowPlaying(false)}>
           {player}
@@ -199,7 +246,7 @@ function SlidingPlayer({ open, onClose, children }: { open: boolean; onClose: ()
   function pointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (!open) return
     const target = event.target
-    if (target instanceof Element && target.closest("button, a, input")) return
+    if (target instanceof Element && target.closest("button, a, input, [data-no-swipe]")) return
     startY.current = event.clientY
     setDragging(true)
     event.currentTarget.setPointerCapture(event.pointerId)

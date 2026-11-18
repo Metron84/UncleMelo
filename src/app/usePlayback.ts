@@ -1,14 +1,29 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { isListeningMode, listeningModes, pickNext, type ListeningMode, type PlayHistory } from "../brain/pick.ts"
 import {
+  advanceIndex,
+  comingTracks,
+  nextRepeat,
+  restoredPlayback,
+  shuffleRemaining,
+  type RepeatMode,
+  type SleepChoice,
+} from "./playback-order.ts"
+import {
   audioElement,
+  cancelSleepFade,
+  fadeOutForSleep,
   hasLoadedFile,
   pausePlayback,
   playFile,
   playbackTime,
   restartTrack,
   resumePlayback,
+  seekTo,
+  setCrossfadeSeconds,
   setMediaSession,
+  setNaturalHandoff,
+  setOutputMuted,
   setPlaybackState,
   setUpcomingProvider,
   subscribePlayback,
@@ -16,7 +31,27 @@ import {
 } from "../engine/player.ts"
 import { artworkFor, genreSquareUrl } from "../library/artwork.ts"
 import { genreCover, sortLibrary } from "../library/browse.ts"
-import { loadAllCovers, loadLastTrackId, loadMode, loadPlays, recordPlay, saveLastTrackId, saveMode, type PlayRecord } from "../library/db.ts"
+import {
+  deleteHidden,
+  loadAllCovers,
+  loadCrossfade,
+  loadHiddenIds,
+  loadLastTrackId,
+  loadLoveIds,
+  loadMode,
+  loadPlays,
+  loadRepeat,
+  loadShuffle,
+  recordPlay,
+  saveCrossfade,
+  saveHidden,
+  saveLastTrackId,
+  saveLove,
+  saveMode,
+  saveRepeat,
+  saveShuffle,
+  type PlayRecord,
+} from "../library/db.ts"
 import { readPermission, resolveTrackFile } from "../library/folder.ts"
 import { phoneFile, phoneStorageAvailable } from "../library/phone.ts"
 import type { TrackRecord } from "../library/types.ts"
@@ -52,6 +87,16 @@ export function usePlayback(
   const [scope, setScope] = useState<TrackRecord[] | null>(null)
   const [scopePlayed, setScopePlayed] = useState<string[]>([])
   const [art, setArt] = useState<Record<string, string>>({})
+  const [shuffle, setShuffle] = useState(false)
+  const [repeat, setRepeat] = useState<RepeatMode>("off")
+  const [muted, setMuted] = useState(false)
+  const [loved, setLoved] = useState<Set<string>>(() => new Set())
+  const [hidden, setHidden] = useState<Set<string>>(() => new Set())
+  const [crossfade, setCrossfade] = useState(6)
+  const [sleepEnds, setSleepEnds] = useState<number | null>(null)
+  const [sleepSong, setSleepSong] = useState(false)
+  const [sleeping, setSleeping] = useState(false)
+  const [sleepNow, setSleepNow] = useState(() => Date.now())
 
   const directoryRef = useRef(directory)
   const tracksRef = useRef(tracks)
@@ -70,6 +115,16 @@ export function usePlayback(
   const booted = useRef(false)
   const lostAccess = useRef(onPermissionLost)
   const sessionFileRef = useRef(sessionFile)
+  const shuffleRef = useRef(false)
+  const repeatRef = useRef<RepeatMode>("off")
+  const originalRef = useRef<TrackRecord[]>([])
+  const lovedRef = useRef<Set<string>>(new Set())
+  const hiddenRef = useRef<Set<string>>(new Set())
+  const sleepSongRef = useRef(false)
+  const sleepEndsRef = useRef<number | null>(null)
+  const sleepingRef = useRef(false)
+  const runSleepRef = useRef(() => {})
+  const mutedRef = useRef(false)
   const bridge = useRef({
     handoff: (_info: Handoff) => {},
     ended: (_position: number, _duration: number) => {},
@@ -82,13 +137,17 @@ export function usePlayback(
     if (ahead[0]) return { track: ahead[0], reason: "" }
     const queued = !endless && queue[index + 1] ? queue[index + 1] : null
     if (queued) return { track: queued, reason: "" }
+    if (repeat === "all" && queue.length > 0) {
+      const wrapped = queue[(index + 1) % queue.length]
+      if (wrapped) return { track: wrapped, reason: "" }
+    }
     if (!current) return { track: null as TrackRecord | null, reason: "" }
     const played = new Set(scopePlayed)
     const remaining = scope?.filter((track) => track.id !== current.id && !played.has(track.id)) ?? null
     const pool = remaining && remaining.length > 0 ? remaining : tracks
-    const choice = pickNext(current, pool, history, mode, Date.now())
+    const choice = pickNext(current, pool, history, mode, Date.now(), Math.random, { loved, hidden })
     return { track: choice?.track ?? null, reason: choice?.reason ?? "" }
-  }, [ahead, endless, queue, index, current, tracks, history, mode, scope, scopePlayed])
+  }, [ahead, endless, queue, index, current, tracks, history, mode, scope, scopePlayed, repeat, loved, hidden])
 
   useEffect(() => {
     directoryRef.current = directory
@@ -104,21 +163,32 @@ export function usePlayback(
     scopeRef.current = scope
     lostAccess.current = onPermissionLost
     sessionFileRef.current = sessionFile
+    shuffleRef.current = shuffle
+    repeatRef.current = repeat
+    lovedRef.current = loved
+    hiddenRef.current = hidden
+    sleepSongRef.current = sleepSong
+    sleepEndsRef.current = sleepEnds
+    mutedRef.current = muted
     bridge.current.next = () => void skip(1)
     bridge.current.previous = () => void skip(-1)
     bridge.current.play = () => void toggle()
     bridge.current.handoff = onHandoff
     bridge.current.ended = (position, length) => {
       logLeave(position, length, "ended")
-      void skip(1)
+      if (sleepingRef.current || sleepSongRef.current) {
+        if (sleepSongRef.current) runSleepRef.current()
+        return
+      }
+      void skip(1, "ended")
     }
   })
 
   useEffect(() => {
     if (tracks.length === 0 || booted.current) return
     let live = true
-    Promise.all([loadLastTrackId(), loadMode(), loadPlays()])
-      .then(async ([last, savedMode, plays]) => {
+    Promise.all([loadLastTrackId(), loadMode(), loadPlays(), loadShuffle(), loadRepeat(), loadCrossfade(), loadLoveIds(), loadHiddenIds()])
+      .then(async ([last, savedMode, plays, shuffleOn, savedRepeat, fade, loveIds, hiddenIds]) => {
         if (!live) return
         const sorted = sortLibrary(tracks)
         const found = last ? sorted.findIndex((track) => track.id === last) : 0
@@ -128,6 +198,17 @@ export function usePlayback(
           setMode(savedMode)
         }
         setHistory(plays)
+        setCrossfadeSeconds(fade)
+        setCrossfade(fade)
+        repeatRef.current = savedRepeat
+        setRepeat(savedRepeat)
+        if (savedRepeat === "one") setNaturalHandoff(false)
+        shuffleRef.current = shuffleOn
+        setShuffle(shuffleOn)
+        lovedRef.current = new Set(loveIds)
+        setLoved(lovedRef.current)
+        hiddenRef.current = new Set(hiddenIds)
+        setHidden(hiddenRef.current)
         const covers = await loadAllCovers()
         if (!live) return
         const urls: Record<string, string> = {}
@@ -137,9 +218,11 @@ export function usePlayback(
           coversRef.current.set(cover.id, { url, type: cover.blob.type || "image/jpeg" })
         }
         setArt(urls)
-        setQueue(sorted)
+        originalRef.current = sorted
+        const ordered = shuffleOn ? shuffleRemaining(sorted, start, Math.random) : sorted
+        setQueue(ordered)
         setIndex(start)
-        setCurrent(sorted[start] ?? null)
+        setCurrent(ordered[start] ?? null)
         booted.current = true
       })
       .catch(() => {
@@ -177,6 +260,11 @@ export function usePlayback(
       time: (currentTime, nextDuration) => {
         setElapsed(currentTime)
         if (Number.isFinite(nextDuration) && nextDuration > 0) setDuration(nextDuration)
+        if (repeatRef.current === "one") setNaturalHandoff(false)
+        if (sleepSongRef.current && Number.isFinite(nextDuration) && nextDuration - currentTime <= 10) {
+          setNaturalHandoff(false)
+          runSleepRef.current()
+        }
       },
       play: () => setPlaying(true),
       pause: () => setPlaying(false),
@@ -184,6 +272,16 @@ export function usePlayback(
       handoff: (info) => bridge.current.handoff(info),
     })
   }, [])
+
+  useEffect(() => {
+    if (sleepEnds === null) return
+    const id = window.setInterval(() => {
+      const now = Date.now()
+      setSleepNow(now)
+      if (sleepEndsRef.current !== null && now >= sleepEndsRef.current) runSleepRef.current()
+    }, 1000)
+    return () => window.clearInterval(id)
+  }, [sleepEnds])
 
   useEffect(() => {
     if (!current) return
@@ -271,9 +369,14 @@ export function usePlayback(
       const list = queueRef.current
       const at = indexRef.current
       const queued = !endlessRef.current ? list[at + 1] : undefined
+      const wrapped = repeatRef.current === "all" && list.length > 0 ? list[(at + 1) % list.length] : undefined
       if (queued && queued.id === armed.id) {
         indexRef.current = at + 1
         setIndex(at + 1)
+      } else if (wrapped && wrapped.id === armed.id) {
+        const nextAt = (at + 1) % list.length
+        indexRef.current = nextAt
+        setIndex(nextAt)
       } else {
         endlessRef.current = true
         setEndless(true)
@@ -356,10 +459,29 @@ export function usePlayback(
     }
   }
 
-  async function skip(step: number) {
+  async function replayCurrent() {
+    const track = currentRef.current
+    if (!track) return
+    restartTrack()
+    setElapsed(0)
+    try {
+      await resumePlayback()
+    } catch {
+      setNotice("That song couldn't be opened.")
+      return
+    }
+    startSession(track)
+  }
+
+  async function skip(step: number, how: "manual" | "ended" = "manual") {
+    if (sleepingRef.current && how === "ended") return
     if (step < 0 && playbackTime() > 5) {
       restartTrack()
       setElapsed(0)
+      return
+    }
+    if (how === "ended" && repeatRef.current === "one") {
+      await replayCurrent()
       return
     }
     if (step > 0 && aheadRef.current[0]) {
@@ -368,10 +490,6 @@ export function usePlayback(
     }
     const list = queueRef.current
     const at = indexRef.current
-    if (!endlessRef.current && step > 0 && at + 1 < list.length) {
-      await goTo(list[at + 1], list, at + 1)
-      return
-    }
     if (step < 0 && at > 0) {
       await goTo(list[at - 1], list, at - 1)
       return
@@ -380,10 +498,19 @@ export function usePlayback(
       await goTo(list[list.length - 1], list, list.length - 1)
       return
     }
+    if (step > 0) {
+      const nextAt = advanceIndex(at, list.length, repeatRef.current, how === "manual")
+      const stayInList = !endlessRef.current || repeatRef.current === "all"
+      if (stayInList && nextAt !== null) {
+        await goTo(list[nextAt], list, nextAt)
+        return
+      }
+    }
+    const bias = { loved: lovedRef.current, hidden: hiddenRef.current }
     const choice =
       nextRef.current && nextRef.current.id !== currentRef.current?.id
         ? { track: nextRef.current, reason: "" }
-        : pickNext(currentRef.current, tracksRef.current, historyRef.current, modeRef.current, Date.now())
+        : pickNext(currentRef.current, tracksRef.current, historyRef.current, modeRef.current, Date.now(), Math.random, bias)
     if (!choice) return
     endlessRef.current = true
     setEndless(true)
@@ -419,7 +546,10 @@ export function usePlayback(
     clearPlans()
     endlessRef.current = true
     setEndless(true)
-    const choice = pickNext(currentRef.current, tracksRef.current, historyRef.current, modeRef.current, Date.now())
+    const choice = pickNext(currentRef.current, tracksRef.current, historyRef.current, modeRef.current, Date.now(), Math.random, {
+      loved: lovedRef.current,
+      hidden: hiddenRef.current,
+    })
     if (!choice) return
     void goTo(choice.track, [choice.track], 0)
   }
@@ -430,7 +560,9 @@ export function usePlayback(
     endlessRef.current = false
     setEndless(false)
     const safe = Math.min(Math.max(at, 0), list.length - 1)
-    void goTo(list[safe], list, safe)
+    originalRef.current = list
+    const ordered = shuffleRef.current ? shuffleRemaining(list, safe, Math.random) : list
+    void goTo(ordered[safe], ordered, safe)
   }
 
   function rememberQueue(track: TrackRecord, where: "next" | "end") {
@@ -449,9 +581,180 @@ export function usePlayback(
     setScopePlayed([])
     endlessRef.current = true
     setEndless(true)
-    const choice = pickNext(currentRef.current, list, historyRef.current, modeRef.current, Date.now())
+    const choice = pickNext(currentRef.current, list, historyRef.current, modeRef.current, Date.now(), Math.random, {
+      loved: lovedRef.current,
+      hidden: hiddenRef.current,
+    })
     if (!choice) return
     void goTo(choice.track, [choice.track], 0)
+  }
+
+  function toggleShuffle() {
+    if (endlessRef.current) return
+    const next = !shuffleRef.current
+    shuffleRef.current = next
+    setShuffle(next)
+    void saveShuffle(next)
+    const list = queueRef.current
+    const at = indexRef.current
+    if (next) {
+      originalRef.current = list
+      const ordered = shuffleRemaining(list, at, Math.random)
+      queueRef.current = ordered
+      setQueue(ordered)
+      return
+    }
+    const playing = list[at]
+    const original = originalRef.current.length > 0 ? originalRef.current : list
+    if (!playing) return
+    const restored = restoredPlayback(original, playing, (item, currentTrack) => item.id === currentTrack.id)
+    queueRef.current = restored.list
+    indexRef.current = restored.index
+    setQueue(restored.list)
+    setIndex(restored.index)
+  }
+
+  function cycleRepeat() {
+    const next = nextRepeat(repeatRef.current)
+    repeatRef.current = next
+    setRepeat(next)
+    setNaturalHandoff(next !== "one")
+    void saveRepeat(next)
+  }
+
+  async function toggleMute() {
+    const next = !mutedRef.current
+    mutedRef.current = next
+    setMuted(next)
+    await setOutputMuted(next)
+  }
+
+  function toggleLove() {
+    const trackId = currentRef.current?.id
+    if (!trackId) return
+    const next = new Set(lovedRef.current)
+    const on = !next.has(trackId)
+    if (on) next.add(trackId)
+    else next.delete(trackId)
+    lovedRef.current = next
+    setLoved(next)
+    void saveLove(trackId, on)
+  }
+
+  function hideFromUncle(track: TrackRecord) {
+    const next = new Set(hiddenRef.current)
+    next.add(track.id)
+    hiddenRef.current = next
+    setHidden(next)
+    void saveHidden(track.id)
+  }
+
+  function restoreHidden(id: string) {
+    const next = new Set(hiddenRef.current)
+    next.delete(id)
+    hiddenRef.current = next
+    setHidden(next)
+    void deleteHidden(id)
+  }
+
+  function chooseCrossfade(seconds: number) {
+    const safe = seconds === 0 || seconds === 3 || seconds === 6 || seconds === 10 ? seconds : 6
+    setCrossfade(safe)
+    setCrossfadeSeconds(safe)
+    void saveCrossfade(safe)
+  }
+
+  function runSleep() {
+    if (sleepingRef.current) return
+    sleepingRef.current = true
+    setSleeping(true)
+    sleepSongRef.current = false
+    setSleepSong(false)
+    setSleepEnds(null)
+    fadeOutForSleep(10, () => {
+      sleepingRef.current = false
+      setSleeping(false)
+      setNaturalHandoff(repeatRef.current !== "one")
+    })
+  }
+
+  useEffect(() => {
+    runSleepRef.current = runSleep
+  })
+
+  function chooseSleep(choice: SleepChoice) {
+    if (choice === "off") {
+      cancelSleepFade()
+      sleepingRef.current = false
+      setSleeping(false)
+      sleepSongRef.current = false
+      setSleepSong(false)
+      setSleepEnds(null)
+      setNaturalHandoff(repeatRef.current !== "one")
+      return
+    }
+    if (sleepingRef.current) {
+      cancelSleepFade()
+      sleepingRef.current = false
+      setSleeping(false)
+    }
+    if (choice === "song") {
+      sleepSongRef.current = true
+      setSleepSong(true)
+      setSleepEnds(null)
+      return
+    }
+    sleepSongRef.current = false
+    setSleepSong(false)
+    setSleepEnds(Date.now() + Number(choice) * 60 * 1000)
+    setSleepNow(Date.now())
+  }
+
+  function writeQueue(list: TrackRecord[], at = indexRef.current) {
+    queueRef.current = list
+    indexRef.current = at
+    setQueue(list)
+    setIndex(at)
+  }
+
+  function commitComing(next: TrackRecord[]) {
+    if (endlessRef.current) {
+      aheadRef.current = next
+      setAhead(next)
+      return
+    }
+    const at = indexRef.current
+    const head = queueRef.current.slice(0, at + 1)
+    aheadRef.current = []
+    setAhead([])
+    writeQueue([...head, ...next], at)
+    if (!shuffleRef.current) originalRef.current = queueRef.current
+  }
+
+  function clearComing() {
+    commitComing([])
+    const currentId = currentRef.current?.id
+    const at = originalRef.current.findIndex((track) => track.id === currentId)
+    if (at >= 0) originalRef.current = originalRef.current.slice(0, at + 1)
+  }
+
+  function reorderComing(next: TrackRecord[]) {
+    const before = comingTracks(aheadRef.current, queueRef.current, indexRef.current, endlessRef.current)
+    commitComing(next)
+    if (endlessRef.current) return
+    if (!shuffleRef.current) {
+      originalRef.current = queueRef.current
+      return
+    }
+    const keep = new Set(next.map((track) => track.id))
+    const removed = new Set(before.filter((track) => !keep.has(track.id)).map((track) => track.id))
+    const currentId = currentRef.current?.id
+    originalRef.current = originalRef.current.filter((track) => track.id === currentId || !removed.has(track.id))
+  }
+
+  function seek(seconds: number) {
+    seekTo(seconds)
+    setElapsed(Math.max(0, seconds))
   }
 
   return {
@@ -477,5 +780,27 @@ export function usePlayback(
     letUncleChoose,
     endless,
     scope,
+    shuffle,
+    repeat,
+    muted,
+    loved: current ? loved.has(current.id) : false,
+    lovedIds: loved,
+    toggleShuffle,
+    cycleRepeat,
+    toggleMute: () => void toggleMute(),
+    toggleLove,
+    hideFromUncle,
+    restoreHidden,
+    hiddenTracks: tracks.filter((track) => hidden.has(track.id)).map((track) => ({ id: track.id, title: track.title, artist: track.artist })),
+    crossfade,
+    chooseCrossfade,
+    sleepOn: sleepSong || sleepEnds !== null || sleeping,
+    sleepMark: sleepSong ? "End" : sleepEnds !== null ? `${Math.max(1, Math.ceil((sleepEnds - sleepNow) / 60000))}m` : null,
+    chooseSleep,
+    coming: comingTracks(ahead, queue, index, endless),
+    reorderComing,
+    clearComing,
+    handsToUncle: repeat === "off",
+    seek,
   }
 }

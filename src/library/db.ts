@@ -26,6 +26,9 @@ export type PlayRecord = {
 const directoryKey = "directory"
 const lastTrackKey = "lastTrackId"
 const modeKey = "mode"
+const shuffleKey = "shuffle"
+const repeatKey = "repeat"
+const crossfadeKey = "crossfade"
 
 export type ImportRecord = {
   path: string
@@ -45,6 +48,8 @@ class UncleMeloDB extends Dexie {
   plays!: Table<PlayRecord, number>
   scanned!: Table<ScannedFile, string>
   imports!: Table<ImportRecord, string>
+  loves!: Table<{ id: string }, string>
+  hidden!: Table<{ id: string }, string>
 
   constructor() {
     super("unclemelo")
@@ -60,6 +65,10 @@ class UncleMeloDB extends Dexie {
     })
     this.version(4).stores({
       imports: "path",
+    })
+    this.version(5).stores({
+      loves: "id",
+      hidden: "id",
     })
   }
 }
@@ -91,6 +100,54 @@ export async function saveMode(mode: string) {
 export async function loadMode() {
   const row = await db.settings.get(modeKey)
   return typeof row?.value === "string" ? row.value : null
+}
+
+export async function loadShuffle() {
+  const row = await db.settings.get(shuffleKey)
+  return row?.value === true
+}
+
+export async function saveShuffle(on: boolean) {
+  await db.settings.put({ key: shuffleKey, value: on })
+}
+
+export async function loadRepeat() {
+  const row = await db.settings.get(repeatKey)
+  return row?.value === "all" || row?.value === "one" ? row.value : "off"
+}
+
+export async function saveRepeat(mode: "off" | "all" | "one") {
+  await db.settings.put({ key: repeatKey, value: mode })
+}
+
+export async function loadCrossfade() {
+  const row = await db.settings.get(crossfadeKey)
+  return row?.value === 0 || row?.value === 3 || row?.value === 6 || row?.value === 10 ? row.value : 6
+}
+
+export async function saveCrossfade(seconds: number) {
+  await db.settings.put({ key: crossfadeKey, value: seconds })
+}
+
+export async function loadLoveIds() {
+  return (await db.loves.toArray()).map((row) => row.id)
+}
+
+export async function saveLove(id: string, loved: boolean) {
+  if (loved) await db.loves.put({ id })
+  else await db.loves.delete(id)
+}
+
+export async function loadHiddenIds() {
+  return (await db.hidden.toArray()).map((row) => row.id)
+}
+
+export async function saveHidden(id: string) {
+  await db.hidden.put({ id })
+}
+
+export async function deleteHidden(id: string) {
+  await db.hidden.delete(id)
 }
 
 export async function recordPlay(play: PlayRecord) {

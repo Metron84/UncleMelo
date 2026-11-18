@@ -20,7 +20,7 @@ import {
 import type { ScanProgress } from "../library/builder.ts"
 import type { TrackRecord } from "../library/types.ts"
 import { ReadingProgress } from "./ReadingProgress.tsx"
-import { SettingsMenu } from "./SettingsMenu.tsx"
+import { SettingsMenu, type HiddenTrack } from "./SettingsMenu.tsx"
 import { phoneHeaderRows, phoneMiniPlayer, phoneTileGap, phoneTileMinHeight, phoneTilePaddingX } from "./phone-layout.ts"
 
 const homePills: readonly HomeList[] = ["Recently played", "Most played", "Rediscover"]
@@ -59,6 +59,12 @@ export type LibraryPanelProps = {
   onToggleTheme?: () => void
   onImport?: (list: FileList) => void
   skipped?: string[]
+  lovedIds?: ReadonlySet<string>
+  onNotForMe?: (track: TrackRecord) => void
+  crossfade?: number
+  onCrossfade?: (seconds: number) => void
+  hiddenTracks?: HiddenTrack[]
+  onRestoreHidden?: (id: string) => void
 }
 
 export function LibraryPanel(props: LibraryPanelProps) {
@@ -141,6 +147,10 @@ export function LibraryPanel(props: LibraryPanelProps) {
           onImport={props.onImport}
           skipped={props.skipped ?? []}
           sessionOnly={props.sessionOnly}
+          crossfade={props.crossfade}
+          onCrossfade={props.onCrossfade}
+          hiddenTracks={props.hiddenTracks}
+          onRestoreHidden={props.onRestoreHidden}
           searchOpen={searchOpen}
           query={query}
           searchRef={searchRef}
@@ -405,7 +415,7 @@ export function LibraryPanel(props: LibraryPanelProps) {
         ) : (
           <CollectionList
             phone={compact}
-            groups={buildGroups(props.tracks, "Collections")}
+            groups={buildGroups(props.tracks, "Collections", props.lovedIds)}
             onOpen={(group) => openGroup({ title: group.name, tracks: group.tracks, filterKind: null })}
           />
         )}
@@ -422,6 +432,14 @@ export function LibraryPanel(props: LibraryPanelProps) {
             props.onAddToQueue(menu.track)
             setMenu(null)
           }}
+          onNotForMe={
+            props.onNotForMe
+              ? () => {
+                  props.onNotForMe?.(menu.track)
+                  setMenu(null)
+                }
+              : undefined
+          }
           onArtist={() => {
             const name = displayArtist(menu.track)
             const group = buildGroups(props.tracks, "Artist").find((item) => item.name === name)
@@ -444,6 +462,8 @@ export function PhoneMiniPlayer({
   duration,
   onToggle,
   onOpen,
+  loved,
+  onLove,
 }: {
   track: TrackRecord | null
   coverUrl: string | null
@@ -452,6 +472,8 @@ export function PhoneMiniPlayer({
   duration: number
   onToggle: () => void
   onOpen: () => void
+  loved: boolean
+  onLove: () => void
 }) {
   const progress = duration === 0 ? 0 : Math.min(100, (elapsed / duration) * 100)
   return (
@@ -468,6 +490,16 @@ export function PhoneMiniPlayer({
             <span className="block truncate text-[15px]">{track?.title ?? "Nothing playing"}</span>
             <span className="block truncate text-[12px] text-muted">{track?.artist ?? "Choose a song"}</span>
           </span>
+        </button>
+        <button
+          type="button"
+          className={`grid h-11 w-11 shrink-0 place-items-center ${loved ? "text-accent" : "text-muted"}`}
+          aria-label={loved ? "Loved" : "Love"}
+          aria-pressed={loved}
+          onClick={onLove}
+          disabled={!track}
+        >
+          <HeartMark filled={loved} />
         </button>
         <button type="button" className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-accent text-on-accent" aria-label={playing ? "Pause" : "Play"} onClick={onToggle} disabled={!track}>
           {playing ? <PauseMark /> : <PlayMark />}
@@ -486,6 +518,10 @@ function PhoneHeader({
   onImport,
   skipped,
   sessionOnly,
+  crossfade,
+  onCrossfade,
+  hiddenTracks,
+  onRestoreHidden,
   searchOpen,
   query,
   searchRef,
@@ -505,6 +541,10 @@ function PhoneHeader({
   onImport?: (list: FileList) => void
   skipped: string[]
   sessionOnly: boolean
+  crossfade?: number
+  onCrossfade?: (seconds: number) => void
+  hiddenTracks?: HiddenTrack[]
+  onRestoreHidden?: (id: string) => void
   searchOpen: boolean
   query: string
   searchRef: RefObject<HTMLInputElement | null>
@@ -541,7 +581,17 @@ function PhoneHeader({
             <button type="button" className="grid h-11 w-11 place-items-center" aria-label="Search" onClick={onOpenSearch}>
               <SearchIcon />
             </button>
-            <SettingsMenu busy={busy} onRescan={onRescan} onImport={onImport} skipped={skipped} sessionOnly={sessionOnly} />
+            <SettingsMenu
+              busy={busy}
+              onRescan={onRescan}
+              onImport={onImport}
+              skipped={skipped}
+              sessionOnly={sessionOnly}
+              crossfade={crossfade}
+              onCrossfade={onCrossfade}
+              hiddenTracks={hiddenTracks}
+              onRestoreHidden={onRestoreHidden}
+            />
             <button
               type="button"
               className="grid h-11 w-11 place-items-center"
@@ -927,12 +977,14 @@ function TrackMenu({
   onClose,
   onPlayNext,
   onAdd,
+  onNotForMe,
   onArtist,
 }: {
   menu: MenuState
   onClose: () => void
   onPlayNext: () => void
   onAdd: () => void
+  onNotForMe?: () => void
   onArtist: () => void
 }) {
   const left = Math.min(menu.x, window.innerWidth - 196)
@@ -944,6 +996,7 @@ function TrackMenu({
         <MenuButton label="Play next" onClick={onPlayNext} />
         <MenuButton label="Add to queue" onClick={onAdd} />
         <MenuButton label="Go to artist" onClick={onArtist} />
+        {onNotForMe && <MenuButton label="Not for me" onClick={onNotForMe} />}
       </div>
     </>
   )
@@ -1079,6 +1132,14 @@ function MoonMark() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M16.2 14.8A6.2 6.2 0 0 1 9.2 7.8 6.4 6.4 0 1 0 16.2 14.8z" />
+    </svg>
+  )
+}
+
+function HeartMark({ filled }: { filled: boolean }) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 18.5s-5.6-3.4-5.6-7.2A3.1 3.1 0 0 1 12 8.6a3.1 3.1 0 0 1 5.6 2.7c0 3.8-5.6 7.2-5.6 7.2z" />
     </svg>
   )
 }
