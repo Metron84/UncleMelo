@@ -212,6 +212,7 @@ function Player() {
           elapsed={playback.elapsed}
           duration={playback.duration}
           onToggle={playback.toggle}
+          onPrevious={playback.previous}
           onOpen={() => setNowPlaying(true)}
           loved={playback.loved}
           onLove={playback.toggleLove}

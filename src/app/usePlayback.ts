@@ -1,6 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { isListeningMode, listeningModes, pickNext, type ListeningMode, type PlayHistory } from "../brain/pick.ts"
 import {
+  choosePrevious,
+  createPlayStack,
+  forwardTrack,
+  hasPrevious,
+  markRestart,
+  previousTrack,
+  rememberTrack,
+  stepBack,
+  type PlayStack,
+} from "./play-history.ts"
+import {
   advanceIndex,
   comingTracks,
   nextRepeat,
@@ -14,9 +25,11 @@ import {
   cancelSleepFade,
   fadeOutForSleep,
   hasLoadedFile,
+  holdAutoAdvance,
   pausePlayback,
   playFile,
   playbackTime,
+  releaseAutoAdvance,
   restartTrack,
   resumePlayback,
   seekTo,
@@ -97,6 +110,7 @@ export function usePlayback(
   const [sleepSong, setSleepSong] = useState(false)
   const [sleeping, setSleeping] = useState(false)
   const [sleepNow, setSleepNow] = useState(() => Date.now())
+  const [playStack, setPlayStack] = useState<PlayStack<TrackRecord>>(() => createPlayStack())
 
   const directoryRef = useRef(directory)
   const tracksRef = useRef(tracks)
@@ -125,15 +139,21 @@ export function usePlayback(
   const sleepingRef = useRef(false)
   const runSleepRef = useRef(() => {})
   const mutedRef = useRef(false)
+  const stackRef = useRef(playStack)
+  const historyIntentRef = useRef<"back" | "forward" | null>(null)
+  const playGenRef = useRef(0)
   const bridge = useRef({
     handoff: (_info: Handoff) => {},
     ended: (_position: number, _duration: number) => {},
     next: () => {},
     previous: () => {},
+    previousRemote: () => {},
     play: () => {},
   })
 
   const upcoming = useMemo(() => {
+    const forward = forwardTrack(playStack)
+    if (forward) return { track: forward, reason: "" }
     if (ahead[0]) return { track: ahead[0], reason: "" }
     const queued = !endless && queue[index + 1] ? queue[index + 1] : null
     if (queued) return { track: queued, reason: "" }
@@ -147,7 +167,7 @@ export function usePlayback(
     const pool = remaining && remaining.length > 0 ? remaining : tracks
     const choice = pickNext(current, pool, history, mode, Date.now(), Math.random, { loved, hidden })
     return { track: choice?.track ?? null, reason: choice?.reason ?? "" }
-  }, [ahead, endless, queue, index, current, tracks, history, mode, scope, scopePlayed, repeat, loved, hidden])
+  }, [ahead, endless, queue, index, current, tracks, history, mode, scope, scopePlayed, repeat, loved, hidden, playStack.tracks, playStack.index])
 
   useEffect(() => {
     directoryRef.current = directory
@@ -171,7 +191,8 @@ export function usePlayback(
     sleepEndsRef.current = sleepEnds
     mutedRef.current = muted
     bridge.current.next = () => void skip(1)
-    bridge.current.previous = () => void skip(-1)
+    bridge.current.previous = () => void goPrevious(false)
+    bridge.current.previousRemote = () => void goPrevious(true)
     bridge.current.play = () => void toggle()
     bridge.current.handoff = onHandoff
     bridge.current.ended = (position, length) => {
@@ -249,11 +270,13 @@ export function usePlayback(
 
   useEffect(() => {
     setUpcomingProvider(async () => {
-      const upcoming = nextRef.current
+      const generation = playGenRef.current
+      const upcoming = forwardTrack(stackRef.current) ?? nextRef.current
       if (!upcoming) return null
-      armedRef.current = upcoming
       const file = await resolveTrack(upcoming)
-      if (file) void warmCover(upcoming, file)
+      if (!file || generation !== playGenRef.current) return null
+      armedRef.current = upcoming
+      void warmCover(upcoming, file)
       return file
     })
     return subscribePlayback({
@@ -297,7 +320,7 @@ export function usePlayback(
         play: () => bridge.current.play(),
         pause: () => pausePlayback(),
         next: () => bridge.current.next(),
-        previous: () => bridge.current.previous(),
+        previous: () => bridge.current.previousRemote(),
       },
     )
   }
@@ -353,19 +376,35 @@ export function usePlayback(
     void recordPlay(row)
   }
 
+  function sameTrack(left: TrackRecord, right: TrackRecord) {
+    return left.id === right.id
+  }
+
+  function commitStack(next: PlayStack<TrackRecord>) {
+    stackRef.current = next
+    setPlayStack(next)
+  }
+
   function onHandoff(info: Handoff) {
     if (!info.fresh) logLeave(info.position, info.duration, info.how)
     const armed = armedRef.current
     if (!armed) return
-    if (scopeRef.current?.some((track) => track.id === armed.id)) {
+    const before = stackRef.current
+    const intent = historyIntentRef.current
+    const expected = previousTrack(before)
+    const nextStack = intent === "back" && expected && expected.id === armed.id ? stepBack(before) : rememberTrack(before, armed, sameTrack)
+    const historyMove = intent !== null || nextStack.tracks === before.tracks
+    historyIntentRef.current = null
+    commitStack(nextStack)
+    if (!historyMove && scopeRef.current?.some((track) => track.id === armed.id)) {
       setScopePlayed((ids) => (ids.includes(armed.id) ? ids : [...ids, armed.id]))
     }
-    const consumedAhead = aheadRef.current[0]?.id === armed.id
+    const consumedAhead = !historyMove && aheadRef.current[0]?.id === armed.id
     if (consumedAhead) {
       const rest = aheadRef.current.slice(1)
       aheadRef.current = rest
       setAhead(rest)
-    } else if (info.how === "natural") {
+    } else if (!historyMove && info.how === "natural") {
       const list = queueRef.current
       const at = indexRef.current
       const queued = !endlessRef.current ? list[at + 1] : undefined
@@ -420,20 +459,25 @@ export function usePlayback(
   }
 
   async function goTo(track: TrackRecord, list: TrackRecord[], at: number) {
+    holdAutoAdvance()
+    historyIntentRef.current = null
+    playGenRef.current += 1
     queueRef.current = list
     indexRef.current = at
     setQueue(list)
     setIndex(at)
     setNotice(null)
-    const file = await resolveTrack(track)
-    if (!file) return
-    armedRef.current = track
     try {
+      const file = await resolveTrack(track)
+      if (!file) return
+      armedRef.current = track
       await playFile(file)
       void warmCover(track, file)
     } catch {
       setNotice("That song couldn't be opened.")
       setPlaying(false)
+    } finally {
+      releaseAutoAdvance()
     }
   }
 
@@ -446,17 +490,70 @@ export function usePlayback(
 }
 
   async function playInserted(track: TrackRecord) {
+    holdAutoAdvance()
+    historyIntentRef.current = null
+    playGenRef.current += 1
     setNotice(null)
-    const file = await resolveTrack(track)
-    if (!file) return
-    armedRef.current = track
     try {
+      const file = await resolveTrack(track)
+      if (!file) return
+      armedRef.current = track
       await playFile(file)
       void warmCover(track, file)
     } catch {
       setNotice("That song couldn't be opened.")
       setPlaying(false)
+    } finally {
+      releaseAutoAdvance()
     }
+  }
+
+  async function playResolved(track: TrackRecord) {
+    holdAutoAdvance()
+    playGenRef.current += 1
+    setNotice(null)
+    try {
+      const file = await resolveTrack(track)
+      if (!file) {
+        historyIntentRef.current = null
+        return
+      }
+      armedRef.current = track
+      await playFile(file)
+      void warmCover(track, file)
+    } catch {
+      historyIntentRef.current = null
+      setNotice("That song couldn't be opened.")
+      setPlaying(false)
+    } finally {
+      releaseAutoAdvance()
+    }
+  }
+
+  async function goPrevious(remote: boolean) {
+    const now = Date.now()
+    const choice = choosePrevious({
+      position: playbackTime(),
+      now,
+      restartedAt: stackRef.current.restartedAt,
+      hasPrevious: hasPrevious(stackRef.current),
+      remote,
+    })
+    if (choice === "restart") {
+      stackRef.current = markRestart(stackRef.current, now)
+      restartTrack()
+      setElapsed(0)
+      return
+    }
+    const track = previousTrack(stackRef.current)
+    if (!track) {
+      stackRef.current = markRestart(stackRef.current, now)
+      restartTrack()
+      setElapsed(0)
+      return
+    }
+    historyIntentRef.current = "back"
+    await playResolved(track)
   }
 
   async function replayCurrent() {
@@ -475,13 +572,18 @@ export function usePlayback(
 
   async function skip(step: number, how: "manual" | "ended" = "manual") {
     if (sleepingRef.current && how === "ended") return
-    if (step < 0 && playbackTime() > 5) {
-      restartTrack()
-      setElapsed(0)
+    if (step < 0) {
+      await goPrevious(false)
       return
     }
     if (how === "ended" && repeatRef.current === "one") {
       await replayCurrent()
+      return
+    }
+    const forward = forwardTrack(stackRef.current)
+    if (forward) {
+      historyIntentRef.current = "forward"
+      await playResolved(forward)
       return
     }
     if (step > 0 && aheadRef.current[0]) {
@@ -490,14 +592,6 @@ export function usePlayback(
     }
     const list = queueRef.current
     const at = indexRef.current
-    if (step < 0 && at > 0) {
-      await goTo(list[at - 1], list, at - 1)
-      return
-    }
-    if (step < 0 && list.length > 1) {
-      await goTo(list[list.length - 1], list, list.length - 1)
-      return
-    }
     if (step > 0) {
       const nextAt = advanceIndex(at, list.length, repeatRef.current, how === "manual")
       const stayInList = !endlessRef.current || repeatRef.current === "all"
@@ -768,7 +862,7 @@ export function usePlayback(
     coverUrl,
     notice,
     toggle: () => void toggle(),
-    previous: () => void skip(-1),
+    previous: () => void goPrevious(false),
     nextTrack: () => void skip(1),
     playList,
     playNext: (track: TrackRecord) => rememberQueue(track, "next"),

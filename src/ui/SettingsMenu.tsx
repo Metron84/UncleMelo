@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { crossfadeOptions } from "../app/playback-order.ts"
+import { isIosPlayback } from "../engine/device.ts"
 import { readShareName, saveShareName } from "../share/mix.ts"
 import { ReflectiveMark } from "./ReflectiveMark.tsx"
 
@@ -38,6 +39,7 @@ export function SettingsMenu({
   const [name, setName] = useState(() => readShareName())
   const root = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const onPhone = isIosPlayback()
 
   useEffect(() => {
     if (!open) return
@@ -82,13 +84,15 @@ export function SettingsMenu({
           {onCrossfade && (
             <div className="mb-3">
               <p className="text-meta text-muted">Crossfade</p>
+              {onPhone && <p className="mt-1 text-meta text-muted">Crossfade isn't available on iPhone. Songs change cleanly instead.</p>}
               <div className="mt-2 grid grid-cols-4 gap-1">
                 {crossfadeOptions.map((option) => (
                   <button
                     key={option.label}
                     type="button"
-                    className={`h-11 rounded-full text-meta ${crossfade === option.seconds ? "bg-accent text-on-accent" : "border border-line text-muted"}`}
+                    className={`h-11 rounded-full text-meta disabled:opacity-40 ${crossfade === option.seconds ? "bg-accent text-on-accent" : "border border-line text-muted"}`}
                     aria-pressed={crossfade === option.seconds}
+                    disabled={onPhone}
                     onClick={() => onCrossfade(option.seconds)}
                   >
                     {option.label}

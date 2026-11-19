@@ -462,6 +462,7 @@ export function PhoneMiniPlayer({
   duration,
   onToggle,
   onOpen,
+  onPrevious,
   loved,
   onLove,
 }: {
@@ -472,6 +473,7 @@ export function PhoneMiniPlayer({
   duration: number
   onToggle: () => void
   onOpen: () => void
+  onPrevious: () => void
   loved: boolean
   onLove: () => void
 }) {
@@ -500,6 +502,9 @@ export function PhoneMiniPlayer({
           disabled={!track}
         >
           <HeartMark filled={loved} />
+        </button>
+        <button type="button" className="grid h-11 w-11 shrink-0 place-items-center" aria-label="Previous track" onClick={onPrevious} disabled={!track}>
+          <PreviousMark />
         </button>
         <button type="button" className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-accent text-on-accent" aria-label={playing ? "Pause" : "Play"} onClick={onToggle} disabled={!track}>
           {playing ? <PauseMark /> : <PlayMark />}
@@ -1140,6 +1145,15 @@ function HeartMark({ filled }: { filled: boolean }) {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M12 18.5s-5.6-3.4-5.6-7.2A3.1 3.1 0 0 1 12 8.6a3.1 3.1 0 0 1 5.6 2.7c0 3.8-5.6 7.2-5.6 7.2z" />
+    </svg>
+  )
+}
+
+function PreviousMark() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M7 6.5v11" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M17.5 6.75 9 12l8.5 5.25V6.75z" />
     </svg>
   )
 }
